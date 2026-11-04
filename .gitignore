@@ -1,0 +1,5 @@
+.env
+tg_session*
+messages.db
+messages.db-*
+__pycache__/
