@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS chats (
     kind        TEXT NOT NULL DEFAULT 'group',   -- group | channel
     last_msg_id INTEGER NOT NULL DEFAULT 0,
     last_synced TEXT,
-    tracked     INTEGER NOT NULL DEFAULT 1
+    tracked     INTEGER NOT NULL DEFAULT 1,
+    backfill_floor INTEGER NOT NULL DEFAULT 0    -- >0: paused backfill, resume below this id
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -91,11 +92,22 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 
 
 def get_db(path: str = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(path or DB_PATH)
+    p = path or DB_PATH
+    conn = sqlite3.connect(p, timeout=20.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript(SCHEMA)
+    conn.execute("PRAGMA busy_timeout=20000")
+    if p not in _INITIALIZED:
+        conn.executescript(SCHEMA)
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(chats)")]
+        if "backfill_floor" not in cols:   # migrate existing DBs
+            conn.execute("ALTER TABLE chats ADD COLUMN backfill_floor "
+                         "INTEGER NOT NULL DEFAULT 0")
+        _INITIALIZED.add(p)
     return conn
+
+
+_INITIALIZED = set()
 
 
 def init_db(path: str = None):
@@ -124,9 +136,21 @@ def get_tracked_chats(conn):
 
 def get_sync_state(conn, chat_id):
     row = conn.execute(
-        "SELECT last_msg_id, last_synced FROM chats WHERE chat_id=?", (chat_id,)
+        "SELECT last_msg_id, last_synced, backfill_floor FROM chats "
+        "WHERE chat_id=?", (chat_id,),
     ).fetchone()
-    return (row["last_msg_id"], row["last_synced"]) if row else (0, None)
+    if row:
+        return (row["last_msg_id"], row["last_synced"], row["backfill_floor"])
+    return (0, None, 0)
+
+
+def set_backfill_progress(conn, chat_id, last_msg_id, floor):
+    """Checkpoint backfill state. floor=0 means the backfill is complete."""
+    conn.execute(
+        "UPDATE chats SET last_msg_id=?, backfill_floor=?, last_synced=? "
+        "WHERE chat_id=?",
+        (last_msg_id, floor, datetime.now(timezone.utc).isoformat(), chat_id),
+    )
 
 
 def update_sync_state(conn, chat_id, last_msg_id):
@@ -138,7 +162,20 @@ def update_sync_state(conn, chat_id, last_msg_id):
 
 def upsert_message(conn, chat_id, msg_id, date, sender_id, sender_name,
                    text, has_media=0, edited=0):
-    conn.execute(
+    """Insert/update one message, keeping the FTS index in sync incrementally
+    (never a full rebuild - external-content FTS5 supports row-level upkeep)."""
+    norm = normalize_text(text)
+    row = conn.execute(
+        "SELECT rowid, text_norm FROM messages WHERE chat_id=? AND msg_id=?",
+        (chat_id, msg_id),
+    ).fetchone()
+    if row is not None:  # update: drop the old index entry, then re-add
+        conn.execute(
+            "INSERT INTO messages_fts(messages_fts, rowid, text_norm) "
+            "VALUES('delete', ?, ?)",
+            (row["rowid"], row["text_norm"] or ""),
+        )
+    cur = conn.execute(
         """INSERT INTO messages (chat_id, msg_id, date, sender_id, sender_name,
                                  text, text_norm, has_media, edited)
            VALUES (?,?,?,?,?,?,?,?,?)
@@ -148,12 +185,17 @@ def upsert_message(conn, chat_id, msg_id, date, sender_id, sender_name,
              text_norm=excluded.text_norm, has_media=excluded.has_media,
              edited=excluded.edited""",
         (chat_id, msg_id, date, sender_id, sender_name, text,
-         normalize_text(text), has_media, edited),
+         norm, has_media, edited),
+    )
+    conn.execute(
+        "INSERT INTO messages_fts(rowid, text_norm) VALUES (?, ?)",
+        (row["rowid"] if row is not None else cur.lastrowid, norm),
     )
 
 
 def reindex_fts(conn):
-    """Rebuild the FTS index (external-content tables need explicit refresh)."""
+    """Manual full FTS rebuild - not used by sync anymore (upsert_message
+    maintains the index incrementally). Keep for repairs/migrations."""
     conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
 
 
@@ -196,7 +238,7 @@ def search(conn, phrases, chat_ids=None, sender=None,
         FROM messages_fts
         JOIN messages m ON m.rowid = messages_fts.rowid
         JOIN chats c   ON c.chat_id = m.chat_id
-        WHERE messages_fts MATCH ?
+        WHERE messages_fts MATCH ? AND c.tracked = 1
     """
     params = [match_expr]
 
@@ -205,8 +247,8 @@ def search(conn, phrases, chat_ids=None, sender=None,
         query += f" AND m.chat_id IN ({marks})"
         params.extend(chat_ids)
     if sender:
-        query += " AND m.sender_name LIKE ?"
-        params.append(f"%{sender}%")
+        query += " AND m.sender_name = ?"
+        params.append(sender)
     if date_from:
         query += " AND m.date >= ?"
         params.append(_expand_date(date_from))
@@ -219,6 +261,81 @@ def search(conn, phrases, chat_ids=None, sender=None,
 
     rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
+
+
+def browse(conn, chat_ids=None, sender=None, date_from=None, date_to=None,
+           media=None, cursor=None, limit=50, sort="desc"):
+    """Keyset-paginated chronological feed across tracked chats.
+
+    cursor - "date|chat_id|msg_id" of the last row of the previous page
+              (returned as next_cursor). Ignored if malformed.
+    sort   - "desc" (newest first) or "asc" (oldest first).
+    Returns (rows, next_cursor, has_more).
+    """
+    desc = sort != "asc"
+    query = """
+        SELECT m.chat_id, m.msg_id, m.date, m.sender_id, m.sender_name,
+               m.text, m.has_media, m.edited, c.title AS chat_title
+        FROM messages m JOIN chats c ON c.chat_id = m.chat_id
+        WHERE c.tracked = 1
+    """
+    params = []
+    if chat_ids:
+        marks = ",".join("?" * len(chat_ids))
+        query += f" AND m.chat_id IN ({marks})"
+        params.extend(chat_ids)
+    if sender:
+        query += " AND m.sender_name = ?"
+        params.append(sender)
+    if date_from:
+        query += " AND m.date >= ?"
+        params.append(_expand_date(date_from))
+    if date_to:
+        query += " AND m.date <= ?"
+        params.append(_expand_date(date_to, end=True))
+    if media is not None:
+        query += " AND m.has_media = ?"
+        params.append(1 if media else 0)
+    if cursor:
+        try:
+            c_date, c_chat, c_msg = cursor.split("|", 2)
+            c_chat, c_msg = int(c_chat), int(c_msg)
+        except ValueError:
+            c_date = None
+        if c_date is not None:
+            if desc:
+                query += (" AND (m.date < ? OR (m.date = ? AND (m.chat_id < ?"
+                          " OR (m.chat_id = ? AND m.msg_id < ?))))")
+            else:
+                query += (" AND (m.date > ? OR (m.date = ? AND (m.chat_id > ?"
+                          " OR (m.chat_id = ? AND m.msg_id > ?))))")
+            params.extend([c_date, c_date, c_chat, c_chat, c_msg])
+    order = "DESC" if desc else "ASC"
+    query += (f" ORDER BY m.date {order}, m.chat_id {order}, m.msg_id {order}"
+              " LIMIT ?")
+    params.append(limit + 1)
+    rows = conn.execute(query, params).fetchall()
+    has_more = len(rows) > limit
+    out = [dict(r) for r in rows[:limit]]
+    next_cursor = None
+    if has_more and out:
+        last = out[-1]
+        next_cursor = f"{last['date']}|{last['chat_id']}|{last['msg_id']}"
+    return out, next_cursor, has_more
+
+
+def senders(conn, chat_ids=None, limit=200):
+    """Distinct sender names with message counts, for filter dropdowns."""
+    query = ("SELECT sender_name, COUNT(*) AS count FROM messages "
+             "WHERE sender_name IS NOT NULL AND sender_name != ''")
+    params = []
+    if chat_ids:
+        marks = ",".join("?" * len(chat_ids))
+        query += f" AND chat_id IN ({marks})"
+        params.extend(chat_ids)
+    query += " GROUP BY sender_name ORDER BY count DESC, sender_name LIMIT ?"
+    params.append(limit)
+    return [dict(r) for r in conn.execute(query, params).fetchall()]
 
 
 def recent(conn, chat_ids=None, days=7, limit=500):
@@ -245,7 +362,11 @@ def stats(conn):
     n_chats = conn.execute(
         "SELECT COUNT(*) c FROM chats WHERE tracked=1").fetchone()["c"]
     last = conn.execute("SELECT MAX(date) d FROM messages").fetchone()["d"]
-    return {"messages": n_msgs, "chats": n_chats, "last_message": last}
+    pending = conn.execute(
+        "SELECT COUNT(*) c FROM chats WHERE tracked=1 "
+        "AND (backfill_floor > 0 OR last_msg_id = 0)").fetchone()["c"]
+    return {"messages": n_msgs, "chats": n_chats, "last_message": last,
+            "pending_backfills": pending}
 
 
 # ---------------------------------------------------------------------------

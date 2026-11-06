@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import os
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
@@ -29,6 +30,9 @@ from telethon.tl.types import User, Channel, Chat
 API_ID = os.environ.get("TELEGRAM_API_ID")
 API_HASH = os.environ.get("TELEGRAM_API_HASH")
 SESSION = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tg_session")
+
+# Set by the web app's "stop" endpoint; checked between messages/chats.
+CANCEL = threading.Event()
 
 
 def need_creds():
@@ -72,9 +76,12 @@ def store_message(conn, chat_id, msg):
 
 
 async def iter_with_flood_retry(client, chat, **kwargs):
-    """Yield messages, transparently waiting out Telegram flood limits."""
+    """Yield messages, transparently waiting out Telegram flood limits.
+    Stops early (cleanly) when a cancel was requested."""
     it = client.iter_messages(chat, wait_time=1, **kwargs)
     while True:
+        if CANCEL.is_set():
+            return
         try:
             msg = await it.__anext__()
         except StopAsyncIteration:
@@ -91,8 +98,10 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
 
     days=N        - re-fetch ALL messages from the last N days (catches edits)
     incremental   - fetch messages newer than the last synced message ID
-    full=True     - fetch entire history (ignores sync state)
-    Default (days=None) = plain incremental sync.
+    full=True     - fetch entire history from scratch
+    History backfills are checkpointed (chats.backfill_floor) so they can be
+    stopped and resumed without losing progress.
+    Default (days=None) = plain incremental sync (+ backfill resume if paused).
     """
     chat = await client.get_entity(chat_id)
     title = getattr(chat, "title", "") or str(chat_id)
@@ -104,19 +113,49 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
         kind = "group"
     db.upsert_chat(conn, chat_id, title, getattr(chat, "username", None), kind)
 
-    last_msg_id, _ = db.get_sync_state(conn, chat_id)
+    last_msg_id, _, floor = db.get_sync_state(conn, chat_id)
     min_id = 0 if full else last_msg_id
     newest_id = last_msg_id
+    if full:
+        floor = 0
     count = 0
     since = (datetime.now(timezone.utc) - timedelta(days=days)) if days else None
 
     def tick():
         nonlocal count
         count += 1
+        if count % 200 == 0:
+            conn.commit()  # short transactions -> tiny write-lock windows
         if count % 500 == 0:
-            db.reindex_fts(conn)
-            conn.commit()
             print(f"  ... {count} messages")
+
+    async def run_backfill(max_id=None):
+        """Walk history newest->oldest, checkpointing every 500 messages.
+        On cancel, saves the floor so the next sync resumes right here."""
+        nonlocal newest_id, count
+        kwargs = {"max_id": max_id} if max_id else {}
+        seen = None
+        async for msg in iter_with_flood_retry(client, chat, **kwargs):
+            store_message(conn, chat_id, msg)
+            newest_id = max(newest_id, msg.id)
+            seen = msg.id
+            count += 1
+            if count % 200 == 0:
+                conn.commit()
+            if count % 500 == 0:
+                conn.commit()
+                db.set_backfill_progress(conn, chat_id, newest_id, seen)
+                print(f"  ... {count} messages (checkpoint id {seen})")
+        conn.commit()
+        if seen is not None:
+            paused = CANCEL.is_set()
+            db.set_backfill_progress(conn, chat_id, newest_id,
+                                     seen if paused else 0)
+            conn.commit()
+            if paused:
+                print("  backfill paused - progress saved (sync again to resume)")
+            else:
+                print("  backfill complete")
 
     try:
         if since:
@@ -136,18 +175,17 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
                     store_message(conn, chat_id, msg)
                     newest_id = max(newest_id, msg.id)
                     tick()
-            elif not since:
+
+            if floor > 0:
+                print(f"[{title}] resuming backfill below id {floor} ...")
+                await run_backfill(max_id=floor - 1)
+            elif min_id == 0 and not since:
                 print(f"[{title}] full backfill ...")
-                async for msg in iter_with_flood_retry(client, chat):
-                    store_message(conn, chat_id, msg)
-                    newest_id = max(newest_id, msg.id)
-                    tick()
+                await run_backfill()
     except Exception as e:
         print(f"  error: {e}")
 
     db.update_sync_state(conn, chat_id, newest_id)
-    conn.commit()
-    db.reindex_fts(conn)
     conn.commit()
     total = conn.execute("SELECT COUNT(*) c FROM messages").fetchone()["c"]
     print(f"[{title}] {count} messages processed, DB total: {total}")
@@ -163,6 +201,27 @@ async def list_chats(client, conn):
             ).fetchone()
             mark = "T" if tracked and tracked["tracked"] else " "
             print(f" {mark} {dialog.id:>12}  {dialog.name}")
+
+
+async def fetch_dialogs():
+    """List every group/channel dialog as dicts (used by the web UI)."""
+    client = TelegramClient(SESSION, int(API_ID), API_HASH)
+    await client.start()
+    out = []
+    try:
+        async for d in client.iter_dialogs():
+            if not (d.is_group or d.is_channel):
+                continue
+            kind = "channel" if (d.is_channel and not d.is_group) else "group"
+            out.append({
+                "chat_id": d.id,
+                "title": d.name or str(d.id),
+                "username": getattr(d.entity, "username", None),
+                "kind": kind,
+            })
+    finally:
+        await client.disconnect()
+    return out
 
 
 async def interactive_track(client, conn):
@@ -194,6 +253,9 @@ async def run(args):
             await list_chats(client, conn)
         elif args.track:
             for cid in args.track:
+                if CANCEL.is_set():
+                    print("Cancelled - remaining chats skipped.")
+                    break
                 entity = await client.get_entity(cid)
                 db.upsert_chat(conn, cid, getattr(entity, "title", str(cid)),
                                getattr(entity, "username", None))
@@ -214,6 +276,9 @@ async def run(args):
                 await interactive_track(client, conn)
                 chats = db.get_tracked_chats(conn)
             for chat in chats:
+                if CANCEL.is_set():
+                    print("Cancelled - remaining chats skipped.")
+                    break
                 await sync_chat(client, conn, chat["chat_id"],
                                 full=args.full, days=args.days)
     finally:

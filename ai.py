@@ -2,9 +2,9 @@
 
 Pipeline (keyword + retry):
   1. LLM extracts keywords/phrases + optional filters (chat titles, date range)
-     from the user question. Bilingual (English/Arabic) aware.
+      from the user question. Bilingual (English/Arabic) aware.
   2. FTS5 search. If results look weak, LLM proposes alternative keywords
-     (max 2 retries).
+      (max 2 retries). If still nothing, falls back to recent messages.
   3. LLM answers the question in the question's language, citing [n] sources.
 """
 import json
@@ -15,35 +15,41 @@ import db
 from openai import OpenAI
 
 SYSTEM_EXTRACT = """You extract search keywords from a question about Telegram group messages.
-Groups contain coupon/deal posts in MIXED English and Arabic (often with Hebrew brand names too).
+The groups are mixed-language communities (Arabic and English, some Hebrew brand names):
+car-owner discussions, general chat and questions, and deal/coupon posts.
 Return ONLY a JSON object, no markdown:
 {{
- "keywords": ["restaurant name", "variant spelling", ...],   // 2-6 short search phrases
- "chat_titles": ["exact group titles to restrict to", ...],    // [] if question is about all groups
- "date_from": "YYYY-MM-DD or null",
- "date_to": "YYYY-MM-DD or null",
- "relative_days": null                                          // int if question says "last N days" etc
+  "keywords": ["topic phrase", "variant spelling", ...],     // 2-8 short search phrases
+  "chat_titles": ["exact group titles to restrict to", ...], // [] unless the question clearly targets ONE of the known groups
+  "date_from": "YYYY-MM-DD or null",
+  "date_to": "YYYY-MM-DD or null",
+  "relative_days": null                                       // int if question says "last N days" etc
 }}
 Rules:
-- Keywords must cover BOTH English and Arabic/translated spellings if plausible (e.g. "mcdonalds" and "ماكدونالدز").
+- Keywords must cover BOTH English and Arabic spellings if plausible (e.g. "mcdonalds" and "ماكدونالدز", "fuel consumption" and "استهلاك البنزين").
 - Include likely spelling variants of proper names as separate keywords.
+- Use the vocabulary the groups themselves would use (car model names, brand names, Arabic chat slang) - not formal dictionary terms only.
 - Prefer 1-3 word phrases over single letters.
 - Resolve relative dates using the provided current date.
 Today's date (UTC): {today}"""
 
-SYSTEM_ANSWER = """You answer questions about coupon/deal messages from Telegram groups.
+SYSTEM_ANSWER = """You answer questions about Telegram group messages. The groups are mixed
+Arabic/English communities: car-owner discussions, deal/coupon posts, and general chat.
+
 Given numbered message excerpts, answer the user's question:
 - CRITICAL: answer in the SAME LANGUAGE as the user's question. English question -> English answer. Arabic question -> Arabic answer. Never switch to the messages' language.
-- List each relevant coupon/deal: business name, the offer, expiry/code if present, which group, date.
-- A "code" is only an actual promotional/code token users type in (e.g. MCD30, ALINMA). Do NOT list prices, amounts, or random words as codes. If a code is missing, say so.
-- Cite messages as [n] after each claim, e.g. "20% off at X [2]".
-- Merge duplicates: if multiple messages describe the same deal, list it once with all citations.
-- If the excerpts don't contain the answer, say so honestly. Do NOT invent deals.
-- Ignore expired coupons only if the question implies currently-valid deals."""
+- Ground every claim in the excerpts and cite messages as [n] after each claim, e.g. "owners report X [3][7]".
+- Discussion/opinion questions: summarize the main points, who said what, and where people agree or disagree. Do not invent consensus.
+- Factual/practical questions (prices, places, specs, procedures): give the concrete answer(s) found, with dates, and note if the info may be outdated.
+- Deal/coupon questions: list each relevant deal - business name, the offer, expiry/code if present, which group, date. A "code" is only a real promo token users type in (e.g. MCD30). Do NOT list prices or random words as codes. If a code is missing, say so.
+- Merge duplicates: if multiple messages describe the same deal or make the same point, list it once with all citations.
+- Message texts may be truncated; answer from what is there rather than guessing the missing part.
+- If the excerpts don't contain the answer, say so honestly. Do NOT invent facts, names, prices, or deals.
+- Ignore expired offers or stale info only if the question implies currently-valid answers."""
 
 SYSTEM_RETRY = """The previous keywords found too few Telegram messages. Given the question and
 the keyword sets already tried, propose ONE new set of alternative keywords
-(different spellings, translations, related brand/product words).
+(different spellings, translations, related brand/product/topic words, everyday chat slang).
 Return ONLY a JSON object: {{"keywords": [...], "chat_titles": [], "date_from": null, "date_to": null, "relative_days": null}}
 Today's date (UTC): {today}"""
 
@@ -114,12 +120,43 @@ def _resolve_chat_ids(conn, titles):
     return sorted(set(ids)) or None
 
 
-def _format_messages(rows):
+def _search_diverse(conn, kws, chat_ids=None, date_from=None, date_to=None, limit=200):
+    """FTS search. Without an explicit chat filter, hits are round-robined
+    across tracked chats so a huge group can't drown out smaller ones."""
+    if chat_ids or len(db.get_tracked_chats(conn)) <= 1:
+        return db.search(conn, kws, chat_ids=chat_ids,
+                         date_from=date_from, date_to=date_to,
+                         require_all=False, limit=limit)
+    per_chat = []
+    for c in db.get_tracked_chats(conn):
+        rows = db.search(conn, kws, chat_ids=[c["chat_id"]],
+                         date_from=date_from, date_to=date_to,
+                         require_all=False, limit=limit)
+        per_chat.append(rows)
+    merged = []
+    i = 0
+    while len(merged) < limit:
+        added = False
+        for rows in per_chat:
+            if i < len(rows):
+                merged.append(rows[i])
+                added = True
+                if len(merged) >= limit:
+                    break
+        if not added:
+            break
+        i += 1
+    return merged
+
+
+def _format_messages(rows, max_chars=400):
     lines = []
     for i, m in enumerate(rows, 1):
         date = (m["date"] or "")[:10]
         sender = m["sender_name"] or "unknown"
         text = (m["text"] or "").strip() or "[no text / media only]"
+        if len(text) > max_chars:  # long chats: keep head so more sources fit
+            text = text[:max_chars].rstrip() + "…"
         if m["has_media"] and text != "[no text / media only]":
             text += " [has image]"
         lines.append(f"[{i}] ({m['chat_title']}, {date}, by {sender}): {text}")
@@ -139,8 +176,8 @@ def _dedupe(rows):
     return out
 
 
-def ask(conn, question, max_results=60):
-    """Full pipeline. Returns dict(answer, sources, attempts, keywords_tried)."""
+def ask(conn, question, max_results=80):
+    """Full pipeline. Returns dict(answer, sources, attempts, keywords_tried, fallback)."""
     if not is_configured():
         return {"answer": None,
                 "error": "AI not configured - set AI_API_KEY in .env",
@@ -148,6 +185,9 @@ def ask(conn, question, max_results=60):
 
     client = get_client()
     today = datetime.now(timezone.utc).date()
+    tracked_titles = [c["title"] for c in db.get_tracked_chats(conn)]
+    titles_note = ("Known groups:\n" +
+                   "\n".join(f"- {t}" for t in tracked_titles)) if tracked_titles else ""
     tried_keyword_sets = []
     all_rows = {}      # (chat_id, msg_id) -> row, unioned across attempts
     best_rows = []     # rows from the most successful attempt
@@ -158,7 +198,7 @@ def ask(conn, question, max_results=60):
         attempts += 1
         if attempts == 1:
             system = SYSTEM_EXTRACT.format(today=today)
-            user = question
+            user = question + (("\n\n" + titles_note) if titles_note else "")
         else:
             prev = "; ".join("[" + ", ".join(k) + "]" for k in tried_keyword_sets)
             system = SYSTEM_RETRY.format(today=today)
@@ -178,10 +218,9 @@ def ask(conn, question, max_results=60):
         if chat_ids == []:
             chat_ids = None
 
-        rows = db.search(
+        rows = _search_diverse(
             conn, kws, chat_ids=chat_ids,
             date_from=date_from, date_to=date_to,
-            require_all=False,  # OR: any variant hit counts
             limit=200,
         )
         # union across attempts so retries never lose earlier hits
@@ -196,16 +235,31 @@ def ask(conn, question, max_results=60):
 
     rows = _dedupe(list(all_rows.values()))[:max_results]
 
+    fallback = None
     if not rows:
-        return {"answer": ("I couldn't find any messages matching that. "
-                           "Try different wording, or sync more groups."),
-                "sources": [], "attempts": attempts,
-                "keywords_tried": tried_keyword_sets}
+        # keyword search came up empty - let the model try the recent feed
+        # (covers "what's happening / what did I miss" style questions too)
+        recent = db.recent(conn, limit=120)
+        if not recent:
+            return {"answer": ("I couldn't find any messages matching that. "
+                               "Try different wording, or sync more groups."),
+                    "sources": [], "attempts": attempts,
+                    "keywords_tried": tried_keyword_sets}
+        fallback = "recent"
+        context_rows = recent
+    else:
+        context_rows = rows
 
-    context = _format_messages(rows)
-    answer = _chat(
-        client, SYSTEM_ANSWER,
-        f"Today: {today}\n\nQuestion: {question}\n\nMessages:\n{context}",
-    )
-    return {"answer": answer, "sources": rows, "attempts": attempts,
-            "keywords_tried": tried_keyword_sets}
+    context = _format_messages(context_rows)
+    if fallback:
+        user_msg = (
+            f"Today: {today}\n\nKeyword search found nothing for this question, "
+            f"so you only have the most RECENT messages below. If they don't "
+            f"answer the question, say so honestly and suggest better wording.\n\n"
+            f"Question: {question}\n\nRecent messages:\n{context}"
+        )
+    else:
+        user_msg = f"Today: {today}\n\nQuestion: {question}\n\nMessages:\n{context}"
+    answer = _chat(client, SYSTEM_ANSWER, user_msg)
+    return {"answer": answer, "sources": context_rows, "attempts": attempts,
+            "keywords_tried": tried_keyword_sets, "fallback": fallback}
