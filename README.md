@@ -11,7 +11,10 @@ clickable citations back to the originals.
 Everything runs on your machine: the messages, the database, and your
 Telegram session never leave it.
 
-![Browse and search your archive](docs/screenshots/feed-dark.png)
+<p>
+  <img src="docs/screenshots/feed-dark.png" alt="Browse and search your archive (dark theme)" width="49.5%">
+  <img src="docs/screenshots/feed-light.png" alt="Browse and search your archive (light theme)" width="49.5%">
+</p>
 
 ## Highlights
 
