@@ -1,5 +1,6 @@
 # secrets / personal data
 .env
+ROADMAP.md
 
 # telegram session files (any location)
 tg_session*
