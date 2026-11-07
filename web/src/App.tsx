@@ -8,6 +8,9 @@ import { Feed } from "./components/Feed";
 import { BookmarksView } from "./components/BookmarksView";
 import { DealsView } from "./components/DealsView";
 import { ResearchView } from "./components/ResearchView";
+import { AlertsView, WatchView } from "./components/WatchView";
+import { DigestsView } from "./components/DigestsView";
+import { FaqView } from "./components/FaqView";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { AiPanel } from "./components/AiPanel";
 import { JobCenter } from "./components/JobCenter";
@@ -67,6 +70,14 @@ export default function App() {
             <DealsView />
           ) : mode === "research" ? (
             <ResearchView />
+          ) : mode === "watchlists" ? (
+            <WatchView />
+          ) : mode === "alerts" ? (
+            <AlertsView />
+          ) : mode === "digests" ? (
+            <DigestsView />
+          ) : mode === "faqs" ? (
+            <FaqView />
           ) : (
             <>
               <SearchBar />

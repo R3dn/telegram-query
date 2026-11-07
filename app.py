@@ -30,8 +30,11 @@ from api import archive, general, groups
 from api import auth as auth_api
 from api import bookmarks as bookmarks_api
 from api import deals as deals_api
+from api import digests as digests_api
 from api import exports as exports_api
+from api import faqs as faqs_api
 from api import jobs as jobs_api
+from api import monitor as monitor_api
 from api import research as research_api
 from api import saved as saved_api
 from api import scheduler as scheduler_api
@@ -75,6 +78,14 @@ async def lifespan(app: FastAPI):
     # user enabled it; runs inside the sync job thread, never the UI thread)
     if deals.post_sync_hook not in jobs.POST_SYNC_HOOKS:
         jobs.POST_SYNC_HOOKS.append(deals.post_sync_hook)
+    # v0.6: watchlist matching is deterministic and cheap - always runs
+    import watchlists
+    if watchlists.post_sync_hook not in jobs.POST_SYNC_HOOKS:
+        jobs.POST_SYNC_HOOKS.append(watchlists.post_sync_hook)
+    # v0.6: digest schedules ride the scheduler tick (cheap when idle)
+    import digests
+    if digests.enqueue_due not in jobs.TICK_HOOKS:
+        jobs.TICK_HOOKS.append(digests.enqueue_due)
     yield
 
 
@@ -85,7 +96,8 @@ app = FastAPI(title="Telegram Query", version=config.__version__,
 for router in (general.router, auth_api.router, archive.router,
                ai_api.router, groups.router, jobs_api.router, setup_api.router,
                scheduler_api.router, saved_api.router, bookmarks_api.router,
-               exports_api.router, deals_api.router, research_api.router):
+               exports_api.router, deals_api.router, research_api.router,
+               monitor_api.router, faqs_api.router, digests_api.router):
     app.include_router(router)
 
 

@@ -1,5 +1,6 @@
 /** Thin fetch wrapper: JSON, error extraction, no secrets ever leave here. */
 import type {
+  Alert,
   AppState,
   AskResult,
   AskScope,
@@ -8,7 +9,10 @@ import type {
   BookmarkRow,
   Deal,
   DealsSettings,
+  Digest,
+  DigestSchedule,
   Dialog,
+  Faq,
   FeedPage,
   Group,
   JobStatus,
@@ -16,6 +20,7 @@ import type {
   SavedSearch,
   SchedulerState,
   Sender,
+  Watchlist,
 } from "./types";
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -198,6 +203,62 @@ export const api = {
       `/api/briefs/${id}/versions`),
   exportBrief: (id: number, format: "md" | "json") =>
     download(`/api/export/briefs/${id}?format=${format}`),
+
+  // watchlists + alerts (v0.6)
+  watchlists: () => req<Watchlist[]>("/api/watchlists"),
+  watchCreate: (p: {
+    name: string; terms: string[]; exclude_terms: string[];
+    chat_ids: number[]; enabled: boolean;
+  }) => post<Watchlist>("/api/watchlists", p),
+  watchUpdate: (id: number, p: {
+    name: string; terms: string[]; exclude_terms: string[];
+    chat_ids: number[]; enabled: boolean;
+  }) => patch<Watchlist>(`/api/watchlists/${id}`, p),
+  watchDelete: (id: number) =>
+    req<{ ok: boolean }>(`/api/watchlists/${id}`, { method: "DELETE" }),
+  watchCheck: (backfillDays = 0) =>
+    post<{ matches: number; unread: number }>("/api/watchlists/check",
+      { backfill_days: backfillDays }),
+  alerts: (p?: { state?: string; watchlist?: number }) => {
+    const q = new URLSearchParams();
+    if (p?.state) q.set("state", p.state);
+    if (p?.watchlist) q.set("watchlist", String(p.watchlist));
+    return req<Alert[]>(`/api/alerts${q.size ? `?${q}` : ""}`);
+  },
+  alertAction: (id: number, action: "read" | "unread" | "archive" | "unarchive") =>
+    post<{ ok: boolean; unread: number }>(`/api/alerts/${id}`, { action }),
+  alertDelete: (id: number) =>
+    req<{ ok: boolean }>(`/api/alerts/${id}`, { method: "DELETE" }),
+  alertsUnread: () => req<{ unread: number }>("/api/alerts/unread"),
+
+  // digests (v0.6)
+  digestSchedules: () => req<DigestSchedule[]>("/api/digests/schedules"),
+  digestScheduleCreate: (p: {
+    frequency: string; chat_ids: number[]; hour: number;
+    language: string; enabled: boolean;
+  }) => post<DigestSchedule>("/api/digests/schedules", p),
+  digestScheduleDelete: (id: number) =>
+    req<{ ok: boolean }>(`/api/digests/schedules/${id}`, { method: "DELETE" }),
+  digests: () => req<Digest[]>("/api/digests"),
+  digestGet: (id: number) => req<Digest>(`/api/digests/${id}`),
+  digestDelete: (id: number) =>
+    req<{ ok: boolean }>(`/api/digests/${id}`, { method: "DELETE" }),
+  digestGenerate: (p: {
+    chat_ids: number[]; frequency: string; language: string;
+  }) => post<{ started: boolean }>("/api/digests/generate", p),
+
+  // faqs (v0.6)
+  faqs: (p?: { status?: string }) => {
+    const q = new URLSearchParams();
+    if (p?.status) q.set("status", p.status);
+    return req<Faq[]>(`/api/faqs${q.size ? `?${q}` : ""}`);
+  },
+  faqPatch: (id: number, p: Record<string, unknown>) =>
+    patch<Faq>(`/api/faqs/${id}`, p),
+  faqDelete: (id: number) =>
+    req<{ ok: boolean }>(`/api/faqs/${id}`, { method: "DELETE" }),
+  faqDiscover: (p: { chat_ids: number[]; days: number }) =>
+    post<{ started: boolean }>("/api/faqs/discover", p),
 
   // groups management
   dialogsGet: () => req<{ ready: boolean; dialogs?: Dialog[] }>("/api/dialogs"),

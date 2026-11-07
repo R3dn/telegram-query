@@ -277,10 +277,85 @@ CREATE TABLE IF NOT EXISTS ai_usage (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage(created_at);
+CREATE TABLE IF NOT EXISTS faq_clusters (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    question        TEXT NOT NULL,               -- display form
+    norm_key        TEXT NOT NULL UNIQUE,        -- normalized signature
+    answer_md       TEXT,                        -- proposed answer (markdown)
+    status          TEXT NOT NULL DEFAULT 'candidate',
+    frequency       INTEGER NOT NULL DEFAULT 0,
+    first_seen      TEXT NOT NULL,
+    last_seen       TEXT NOT NULL,
+    prompt_version  TEXT,
+    model           TEXT,
+    source_questions TEXT NOT NULL DEFAULT '[]', -- JSON [{chat_id,msg_id,date}]
+    source_answers   TEXT NOT NULL DEFAULT '[]',
+    updated_at      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS watchlists (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    terms         TEXT NOT NULL DEFAULT '[]',    -- JSON list
+    exclude_terms TEXT NOT NULL DEFAULT '[]',
+    chat_ids      TEXT NOT NULL DEFAULT '[]',    -- [] = all tracked groups
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    last_match_at TEXT
+);
+CREATE TABLE IF NOT EXISTS alerts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    watchlist_id INTEGER NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+    chat_id      INTEGER NOT NULL,
+    msg_id       INTEGER NOT NULL,
+    matched_term TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL,
+    read         INTEGER NOT NULL DEFAULT 0,
+    archived     INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (watchlist_id, chat_id, msg_id),
+    FOREIGN KEY (chat_id, msg_id) REFERENCES messages(chat_id, msg_id)
+        ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_state ON alerts(watchlist_id, read, archived);
+CREATE TABLE IF NOT EXISTS watch_watermarks (
+    chat_id     INTEGER PRIMARY KEY,
+    last_msg_id INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS digest_schedules (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    frequency  TEXT NOT NULL DEFAULT 'daily',   -- daily | weekly
+    chat_ids   TEXT NOT NULL DEFAULT '[]',
+    hour       INTEGER NOT NULL DEFAULT 9,      -- UTC generation hour
+    weekday    INTEGER NOT NULL DEFAULT 6,     -- 0=Mon..6=Sun (weekly)
+    language   TEXT NOT NULL DEFAULT 'auto',    -- auto | en | ar
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    last_run   TEXT
+);
+CREATE TABLE IF NOT EXISTS digests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    schedule_id  INTEGER REFERENCES digest_schedules(id) ON DELETE SET NULL,
+    period_start TEXT NOT NULL,
+    period_end   TEXT NOT NULL,
+    content_md  TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    fingerprint  TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS digest_citations (
+    digest_id INTEGER NOT NULL REFERENCES digests(id) ON DELETE CASCADE,
+    idx       INTEGER NOT NULL,
+    chat_id   INTEGER NOT NULL,
+    msg_id    INTEGER NOT NULL,
+    excerpt   TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (digest_id, idx),
+    FOREIGN KEY (chat_id, msg_id) REFERENCES messages(chat_id, msg_id)
+        ON DELETE CASCADE
+);
 """
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _migrate(conn):
@@ -319,6 +394,10 @@ def _migrate(conn):
         if "reply_to" not in cols:
             conn.execute("ALTER TABLE messages ADD COLUMN reply_to INTEGER")
         current = 4
+    if current < 5:
+        # v5: monitoring layer (watchlists/alerts/digests/faqs, created by
+        # SCHEMA). No data transforms needed.
+        current = 5
     conn.execute(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)",
         (str(current),))
@@ -579,7 +658,8 @@ def browse(conn, chat_ids=None, sender=None, date_from=None, date_to=None,
     desc = sort != "asc"
     query = """
         SELECT m.chat_id, m.msg_id, m.date, m.sender_id, m.sender_name,
-               m.text, m.has_media, m.edited, c.title AS chat_title,
+               m.text, m.text_norm, m.has_media, m.edited,
+               c.title AS chat_title,
                c.username AS chat_username,
                (b.chat_id IS NOT NULL) AS bookmarked, b.note AS bookmark_note
         FROM messages m JOIN chats c ON c.chat_id = m.chat_id

@@ -38,6 +38,33 @@ class TaskError(Exception):
     """A task could not be completed honestly (provider or model output)."""
 
 
+_CITE_RE = None  # compiled lazily (avoid importing re twice at module init)
+
+
+def validate_citations(text: str, n_rows: int):
+    """Keep only [n] with 1 <= n <= n_rows; strip and report the rest.
+
+    Shared by research briefs, digests, and FAQ answers: the model can never
+    keep a citation that does not index a real retrieved row. Returns
+    (cleaned_text, removed_numbers, cited_indexes)."""
+    global _CITE_RE
+    if _CITE_RE is None:
+        import re
+        _CITE_RE = re.compile(r"\[(\d+)\]")
+    removed, cited = [], set()
+
+    def repl(m):
+        n = int(m.group(1))
+        if 1 <= n <= n_rows:
+            cited.add(n)
+            return m.group(0)
+        removed.append(n)
+        return ""
+
+    cleaned = _CITE_RE.sub(repl, text)
+    return cleaned, removed, cited
+
+
 # ---------------------------------------------------------------------------
 # Provider access (reuses the single OpenAI-compatible client from ai.py)
 # ---------------------------------------------------------------------------

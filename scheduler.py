@@ -146,6 +146,12 @@ def _tick(conn=None) -> None:
             _seen_done = last_done["finished_at"]
             db.set_setting(conn, "scheduler_last_success", now.isoformat())
             conn.commit()
+        # v0.6: digest schedules ride the same 30s loop (cheap when idle)
+        for hook in jobs.TICK_HOOKS:
+            try:
+                hook(conn)
+            except Exception as e:  # noqa: BLE001 - a hook never kills the loop
+                print(f"[scheduler] tick hook failed: {e}")
     finally:
         if own:
             conn.close()

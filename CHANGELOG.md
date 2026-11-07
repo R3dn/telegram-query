@@ -3,6 +3,45 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0] - 2026-11-07
+
+Monitor: from reactive search to proactive knowledge discovery. Watchlists
+and alerts are fully deterministic (no AI, no cost); digests and FAQ
+answers are AI-drafted but citation-validated and human-gated.
+
+### Added
+- **Topic watchlists**: keyword monitors (Arabic/English, normalization-
+  aware) with exclusions and per-group scope, evaluated incrementally after
+  every sync against a per-chat watermark - never the whole archive.
+  Alerts are deduplicated per watchlist+message, and matching never calls
+  the AI provider. The Alerts inbox has new/read/archived states, per-
+  watchlist filtering, jump-to-message, and verified Telegram links.
+  "Check now" re-evaluates on demand, optionally rewinding to cover the
+  last N days for newly created watchlists.
+- **Digests**: cited daily/weekly summaries of selected groups.
+  Deterministic theme hints (top terms) ground the model; every factual
+  item cites `[n]` messages validated on the backend, empty sections are
+  dropped by prompt contract, and unchanged periods are never re-sent to
+  the provider (fingerprint caching + stored-digest reuse). Daily/weekly
+  schedules ride the auto-sync loop; on-demand "digest last day/week"
+  runs as a visible job. History, citations, delete, auto language
+  detection.
+- **FAQ discovery**: recurring questions are clustered deterministically
+  (bilingual interrogative detection + token-similarity, conservative
+  threshold so unrelated questions never merge); recurring clusters get a
+  drafted answer from reply/near-time evidence with backend-validated
+  citations. **Nothing becomes trusted knowledge without human approval**;
+  new evidence against an approved answer flags it for re-review instead
+  of silently replacing it. Approve / reject / mark outdated / edit answers;
+  question sources are inspectable with deep links.
+- Sidebar gains grouped navigation: Knowledge (Deals, Research, FAQs) and
+  Monitor (Watchlists, Alerts with unread badge, Digests).
+- Schema v5: `watchlists`, `alerts`, `watch_watermarks`,
+  `digest_schedules`, `digests`, `digest_citations`, `faq_clusters`
+  (additive-only migrations, FK cascades on message deletion).
+- Digest schedules are checked from the scheduler tick via the new
+  `jobs.TICK_HOOKS` seam.
+
 ## [0.5.0] - 2026-11-07
 
 Remember + Research: the archive becomes structured, evidence-linked

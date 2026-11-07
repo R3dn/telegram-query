@@ -28,7 +28,11 @@ export type FeedMode =
   | "search"
   | "bookmarks"
   | "deals"
-  | "research";
+  | "research"
+  | "watchlists"
+  | "alerts"
+  | "digests"
+  | "faqs";
 export type RightTab = "ai" | "details";
 export type DateChip = "all" | "today" | "7d" | "30d" | "custom";
 

@@ -24,6 +24,10 @@ __all__ = ["JOBS", "JobRunner", "run_sync_job", "fetch_dialogs_job",
 # v0.5 deals). Exceptions are logged, never fail the sync.
 POST_SYNC_HOOKS = []
 
+# Callables run from the scheduler tick (receive a db connection). Used by
+# v0.6 digest schedules. Must stay cheap when nothing is due.
+TICK_HOOKS = []
+
 
 class JobRunner:
     def __init__(self):
@@ -39,7 +43,7 @@ class JobRunner:
         sync/dialogs/extract/brief are deduped; front=True jumps ahead of
         other queued jobs."""
         with self.lock:
-            if name in ("sync", "dialogs", "extract", "brief"):
+            if name in ("sync", "dialogs", "extract", "brief", "digest", "faq"):
                 if (self.running and self.name == name) or \
                         any(n == name for n, _ in self.queue):
                     return False
@@ -193,6 +197,29 @@ def run_brief_job(brief_id):
     conn = db_get_db()
     try:
         research.generate(conn, brief_id)
+    finally:
+        conn.close()
+
+
+def run_digest_job(chat_ids=None, period_start=None, period_end=None,
+                   frequency="daily", language="auto", schedule_id=None):
+    """On-demand or scheduled digest, as a visible job."""
+    import digests
+    conn = db_get_db()
+    try:
+        digests.generate(conn, chat_ids=chat_ids, period_start=period_start,
+                         period_end=period_end, frequency=frequency,
+                         language=language, schedule_id=schedule_id)
+    finally:
+        conn.close()
+
+
+def run_faq_job(chat_ids=None, days=90):
+    """FAQ discovery over a scope, as a visible job."""
+    import faq
+    conn = db_get_db()
+    try:
+        faq.discover(conn, chat_ids=chat_ids, days=days)
     finally:
         conn.close()
 

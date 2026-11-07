@@ -47,6 +47,12 @@ Telegram session never leave it.
 - **Research briefs** — ask a question over selected groups and dates, get
   a saved, citation-validated, re-runnable brief with version history and
   deterministic staleness tracking.
+- **Watchlists & alerts** — deterministic keyword monitors evaluated after
+  every sync (no AI, no cost), with a new/read/archived alert inbox that
+  jumps straight to the original message.
+- **Digests & FAQs** — cited daily/weekly summaries on a schedule or on
+  demand, and recurring questions clustered with drafted answers that
+  nothing trusts until you approve them.
 - **Works with zero groups on day one** — a built-in wizard walks you
   through API credentials, Telegram login (phone + code + 2FA), group
   selection, and your first sync.

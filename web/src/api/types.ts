@@ -117,6 +117,92 @@ export interface Brief {
   stale_count: number;
 }
 
+export interface Watchlist {
+  id: number;
+  name: string;
+  terms: string[];
+  exclude_terms: string[];
+  chat_ids: number[];
+  enabled: boolean;
+  created_at: string;
+  last_match_at: string | null;
+  unread: number;
+}
+
+export interface Alert {
+  id: number;
+  watchlist_id: number;
+  watchlist_name: string;
+  chat_id: number;
+  msg_id: number;
+  matched_term: string;
+  created_at: string;
+  read: number;
+  archived: number;
+  text: string;
+  date: string;
+  sender_name: string | null;
+  chat_title: string;
+  tg_link: string | null;
+}
+
+export interface DigestSchedule {
+  id: number;
+  frequency: "daily" | "weekly";
+  chat_ids: number[];
+  hour: number;
+  weekday: number;
+  language: string;
+  enabled: boolean;
+  created_at: string;
+  last_run: string | null;
+}
+
+export interface DigestCitation {
+  idx: number;
+  chat_id: number;
+  msg_id: number;
+  excerpt: string;
+  text: string | null;
+  date: string | null;
+  chat_title: string | null;
+  tg_link: string | null;
+  missing: boolean;
+}
+
+export interface Digest {
+  id: number;
+  schedule_id: number | null;
+  period_start: string;
+  period_end: string;
+  content_md: string;
+  prompt_version: string;
+  model: string;
+  created_at: string;
+  citations?: DigestCitation[];
+}
+
+export interface FaqSource {
+  chat_id: number;
+  msg_id: number;
+  date: string;
+  text?: string | null;
+  chat_title?: string | null;
+  tg_link: string | null;
+}
+
+export interface Faq {
+  id: number;
+  question: string;
+  answer_md: string | null;
+  status: "candidate" | "approved" | "rejected" | "needs_review" | "outdated";
+  frequency: number;
+  first_seen: string;
+  last_seen: string;
+  updated_at: string;
+  source_questions: FaqSource[];
+}
+
 export interface AskScope {
   chat_ids: number[];
   date_from: string | null;

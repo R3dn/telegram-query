@@ -15,6 +15,7 @@ export function Sidebar() {
   } = store;
   const [filter, setFilter] = useState("");
   const [sched, setSched] = useState<SchedulerState | null>(null);
+  const [alertsUnread, setAlertsUnread] = useState(0);
 
   const shown = useMemo(
     () => groups.filter((g) => !filter || g.title.toLowerCase().includes(filter.toLowerCase())),
@@ -27,6 +28,10 @@ export function Sidebar() {
       try {
         const s = await api.schedulerState();
         if (!dead) setSched(s);
+      } catch { /* ignore */ }
+      try {
+        const u = await api.alertsUnread();
+        if (!dead) setAlertsUnread(u.unread);
       } catch { /* ignore */ }
     };
     void load();
@@ -93,6 +98,23 @@ export function Sidebar() {
         </button>
         <button className={`nav-item ${mode === "research" ? "on" : ""}`} onClick={() => setMode("research")}>
           <span className="nav-ic">🔬</span> Research
+        </button>
+        <button className={`nav-item ${mode === "faqs" ? "on" : ""}`} onClick={() => setMode("faqs")}>
+          <span className="nav-ic">❓</span> FAQs
+        </button>
+      </div>
+
+      <div className="side-nav side-nav-group">
+        <span className="label">Monitor</span>
+        <button className={`nav-item ${mode === "watchlists" ? "on" : ""}`} onClick={() => setMode("watchlists")}>
+          <span className="nav-ic">👁</span> Watchlists
+        </button>
+        <button className={`nav-item ${mode === "alerts" ? "on" : ""}`} onClick={() => setMode("alerts")}>
+          <span className="nav-ic">🔔</span> Alerts
+          {alertsUnread > 0 && <span className="badge warn" style={{ marginInlineStart: "auto" }}>{alertsUnread}</span>}
+        </button>
+        <button className={`nav-item ${mode === "digests" ? "on" : ""}`} onClick={() => setMode("digests")}>
+          <span className="nav-ic">📰</span> Digests
         </button>
       </div>
 

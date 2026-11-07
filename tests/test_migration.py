@@ -57,7 +57,7 @@ def test_upgrade_from_v2_preserves_data_and_flags_reindex(tmp_path):
         # version bumped, data intact
         v = conn.execute("SELECT value FROM schema_meta WHERE key='version'"
                          ).fetchone()["value"]
-        assert v == str(db.SCHEMA_VERSION) and v == "4"
+        assert v == str(db.SCHEMA_VERSION)
         msg = conn.execute("SELECT text FROM messages").fetchone()
         assert msg["text"] == "مبروووك"
         # v4: reply_to captured going forward
@@ -66,7 +66,8 @@ def test_upgrade_from_v2_preserves_data_and_flags_reindex(tmp_path):
         # new tables exist
         for t in ("app_settings", "saved_searches", "bookmarks",
                   "deals", "briefs", "brief_versions", "ai_task_cache",
-                  "ai_usage"):
+                  "ai_usage", "watchlists", "alerts", "digest_schedules",
+                  "digests", "faq_clusters"):
             conn.execute(f"SELECT 1 FROM {t}").fetchone()
         # reindex flagged (extended normalization + existing messages)
         if config.settings.normalization_level == "extended":
@@ -85,7 +86,7 @@ def test_migration_is_idempotent(tmp_path):
         conn.commit()
         v = conn.execute("SELECT value FROM schema_meta WHERE key='version'"
                          ).fetchone()["value"]
-        assert v == "4"
+        assert v == str(db.SCHEMA_VERSION)
         assert conn.execute("SELECT COUNT(*) c FROM messages"
                             ).fetchone()["c"] == 1
     finally:
@@ -100,7 +101,7 @@ def test_fresh_db_needs_no_reindex(tmp_path):
         assert db.get_setting(conn, "needs_reindex") is None
         v = conn.execute("SELECT value FROM schema_meta WHERE key='version'"
                          ).fetchone()["value"]
-        assert v == "4"
+        assert v == str(db.SCHEMA_VERSION)
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(messages)")]
         assert "reply_to" in cols
     finally:

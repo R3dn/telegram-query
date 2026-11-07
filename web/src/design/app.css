@@ -503,3 +503,15 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
   .research-body { flex-direction: column; }
   .brief-list { width: auto; border-inline-end: none; max-height: 200px; }
 }
+
+/* ================= v0.6 additions ================= */
+
+.digest-groups {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 2px 18px 8px; font-size: 12px;
+}
+.faq-answer { font-size: 13px; line-height: 1.6; margin-top: 8px; }
+.faq-answer p { margin: 4px 0; }
+.faq-answer code {
+  background: var(--surface-2); padding: 1px 5px; border-radius: 4px;
+}
