@@ -35,20 +35,45 @@ or writes them to logs.
 |---|---|---|
 | `TG_DB_PATH` | `data/messages.db` | SQLite archive location |
 
-## AI provider (optional — Ask-AI)
+## AI provider (optional — all AI features)
 
 Any OpenAI-compatible chat-completions endpoint works: OpenAI, Azure,
 Groq, Together, OpenRouter, Ollama (`http://localhost:11434/v1`), LM
 Studio, vLLM, and compatible local servers.
 
+Ask-AI, deal extraction, research briefs, digests, and FAQ answer
+drafting all use this one provider. Each AI feature can be disabled
+independently in the UI; without `AI_API_KEY` they all show clear
+"not configured" states while search, browsing, sync, watchlists, and
+alerts keep working (watchlists never use AI at all).
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `AI_BASE_URL` | OpenAI | Base URL of the endpoint |
-| `AI_API_KEY` | — | Key; Ask-AI stays disabled until set |
+| `AI_API_KEY` | — | Key; AI features stay disabled until set |
 | `AI_MODEL` | `gpt-4o-mini` | Model name as the endpoint expects it |
 | `AI_TEMPERATURE` | `0.2` | Generation temperature |
 | `AI_MAX_SOURCES` | `80` | Max messages sent as context per question |
 | `TGQ_GROUPS_HINT` | — | Free-text description of your communities, injected into the keyword extractor to sharpen retrieval (e.g. "local restaurant deal groups in Riyadh") |
+
+## Search normalization (v0.4)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NORMALIZATION` | `extended` | `extended`: Arabic-Indic digit folding (٢٥→25), elongation collapse (هااااي→هاي), Arabizi digit folding inside Latin words (3arabi→عarabi; multi-digit runs like prices/promo codes are never folded), and a Gulf-dialect word map (شلون→كيف, وين→اين, …). `standard`: exact v0.3 rules. |
+| `TGQ_DIALECT_MAP` | built-in Gulf map | JSON object replacing the dialect map entirely, e.g. `{"هلق":"الان"}` |
+
+Changing the level only affects newly synced messages until you rebuild
+the index: **Settings → Rebuild search index** runs the one-time
+normalization rewrite as a visible background job (it is queued
+automatically for existing archives when you first upgrade to v0.4+).
+
+## Auto-sync schedule (v0.4)
+
+Configured in **Settings → Auto-sync** (not env vars — the schedule lives
+in your local database so it survives restarts). Default: enabled, every
+6 hours; range 15 minutes – 7 days. A missed slot while the app was
+closed triggers one catch-up sync on the next start.
 
 ## Server
 

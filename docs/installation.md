@@ -4,7 +4,9 @@
 
 - **Python 3.10 or newer** (3.13 tested)
 - A Telegram account
-- *Optional:* an API key for any OpenAI-compatible provider (enables Ask-AI)
+- *Optional:* an API key for any OpenAI-compatible provider (enables the
+  AI features: Ask-AI, deal extraction, research briefs, digests, and FAQ
+  answer drafting — everything else works without one)
 - *Not required:* Node.js — the frontend build (`web/dist`) is committed.
   Node 20+ is only needed to modify the frontend.
 
@@ -13,7 +15,7 @@
 ### 1. Get the code
 
 ```bash
-git clone https://github.com/<you>/telegram-query.git
+git clone https://github.com/R3dn/telegram-query.git
 cd telegram-query
 ```
 
@@ -99,6 +101,13 @@ changed. Database schema changes are applied automatically on startup and
 are **additive-only** — your archive is never dropped or rewritten. The
 only files that matter are your `.env` and your `data/` directory; backing
 those up backs up everything.
+
+Upgrading to v0.4 or later from a pre-v0.4 database queues a one-time
+**Reindex** job on first start: search normalization improved (Arabizi,
+Gulf dialect, elongation), and the index is rewritten in the background to
+match — visible in the Jobs panel, cancellable, and resumed on the next
+start if interrupted. You can also trigger it manually from
+**Settings → Rebuild search index**.
 
 ## Troubleshooting
 
