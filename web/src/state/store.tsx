@@ -23,7 +23,12 @@ import {
 } from "../utils/history";
 import { jobLabel } from "../utils/format";
 
-export type FeedMode = "browse" | "search" | "bookmarks";
+export type FeedMode =
+  | "browse"
+  | "search"
+  | "bookmarks"
+  | "deals"
+  | "research";
 export type RightTab = "ai" | "details";
 export type DateChip = "all" | "today" | "7d" | "30d" | "custom";
 

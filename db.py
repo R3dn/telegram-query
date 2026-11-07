@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS messages (
     text_norm   TEXT NOT NULL DEFAULT '',
     has_media   INTEGER NOT NULL DEFAULT 0,
     edited      INTEGER NOT NULL DEFAULT 0,
+    reply_to    INTEGER,                -- msg_id this replies to (v0.5)
     PRIMARY KEY (chat_id, msg_id)
 );
 
@@ -187,10 +188,99 @@ CREATE TABLE IF NOT EXISTS bookmarks (
         ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_bookmarks_updated ON bookmarks(updated_at);
+
+-- v0.5: knowledge layer ------------------------------------------------
+CREATE TABLE IF NOT EXISTS deals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    title        TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    category     TEXT,
+    vendor       TEXT,
+    discount_pct REAL,
+    price        REAL,
+    currency     TEXT,
+    promo_code   TEXT,
+    eligibility  TEXT,
+    geo          TEXT,
+    valid_from   TEXT,
+    expires      TEXT,
+    status       TEXT NOT NULL DEFAULT 'unknown',  -- extracted: active|expired|upcoming|unknown
+    user_status  TEXT,                             -- human: confirmed|dismissed (overrides UI)
+    confidence   REAL,
+    fingerprint  TEXT NOT NULL DEFAULT '',
+    prompt_version TEXT NOT NULL DEFAULT '',
+    model        TEXT NOT NULL DEFAULT '',
+    first_seen   TEXT NOT NULL,
+    last_seen    TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deal_sources (
+    deal_id  INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+    chat_id  INTEGER NOT NULL,
+    msg_id   INTEGER NOT NULL,
+    PRIMARY KEY (deal_id, chat_id, msg_id),
+    FOREIGN KEY (chat_id, msg_id) REFERENCES messages(chat_id, msg_id)
+        ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_deals_last_seen ON deals(last_seen);
+CREATE INDEX IF NOT EXISTS idx_deal_sources_msg ON deal_sources(chat_id, msg_id);
+
+CREATE TABLE IF NOT EXISTS briefs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    question   TEXT NOT NULL,
+    chat_ids   TEXT NOT NULL DEFAULT '[]',
+    date_from  TEXT,
+    date_to    TEXT,
+    notes      TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS brief_versions (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    brief_id       INTEGER NOT NULL REFERENCES briefs(id) ON DELETE CASCADE,
+    version        INTEGER NOT NULL,
+    answer_md      TEXT NOT NULL,
+    keywords       TEXT NOT NULL DEFAULT '[]',
+    prompt_version TEXT NOT NULL,
+    model          TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    UNIQUE (brief_id, version)
+);
+CREATE TABLE IF NOT EXISTS brief_citations (
+    version_id INTEGER NOT NULL REFERENCES brief_versions(id) ON DELETE CASCADE,
+    idx        INTEGER NOT NULL,
+    chat_id    INTEGER NOT NULL,
+    msg_id     INTEGER NOT NULL,
+    excerpt    TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (version_id, idx),
+    FOREIGN KEY (chat_id, msg_id) REFERENCES messages(chat_id, msg_id)
+        ON DELETE CASCADE
+);
+
+-- v0.5: AI task infrastructure ----------------------------------------
+CREATE TABLE IF NOT EXISTS ai_task_cache (
+    task           TEXT NOT NULL,
+    scope_hash     TEXT NOT NULL,
+    model          TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    fingerprint    TEXT NOT NULL,
+    result         TEXT NOT NULL,          -- JSON payload
+    created_at     TEXT NOT NULL,
+    PRIMARY KEY (task, scope_hash, model, prompt_version, fingerprint)
+);
+CREATE TABLE IF NOT EXISTS ai_usage (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    task       TEXT NOT NULL,
+    requests   INTEGER NOT NULL DEFAULT 1,
+    tokens_in  INTEGER,
+    tokens_out INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage(created_at);
 """
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _migrate(conn):
@@ -222,6 +312,13 @@ def _migrate(conn):
                 "INSERT OR REPLACE INTO app_settings (key, value) "
                 "VALUES ('needs_reindex', '1')")
         current = 3
+    if current < 4:
+        # v4: knowledge layer tables (deals/briefs/ai cache+usage, created
+        # by SCHEMA) + messages.reply_to capture for context expansion.
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(messages)")]
+        if "reply_to" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN reply_to INTEGER")
+        current = 4
     conn.execute(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)",
         (str(current),))
@@ -338,7 +435,7 @@ def update_sync_state(conn, chat_id, last_msg_id):
 
 
 def upsert_message(conn, chat_id, msg_id, date, sender_id, sender_name,
-                   text, has_media=0, edited=0):
+                   text, has_media=0, edited=0, reply_to=None):
     """Insert/update one message, keeping the FTS index in sync incrementally
     (never a full rebuild - external-content FTS5 supports row-level upkeep)."""
     norm = normalize_text(text)
@@ -354,15 +451,15 @@ def upsert_message(conn, chat_id, msg_id, date, sender_id, sender_name,
         )
     cur = conn.execute(
         """INSERT INTO messages (chat_id, msg_id, date, sender_id, sender_name,
-                                 text, text_norm, has_media, edited)
-           VALUES (?,?,?,?,?,?,?,?,?)
+                                 text, text_norm, has_media, edited, reply_to)
+           VALUES (?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(chat_id, msg_id) DO UPDATE SET
              date=excluded.date, sender_id=excluded.sender_id,
              sender_name=excluded.sender_name, text=excluded.text,
              text_norm=excluded.text_norm, has_media=excluded.has_media,
-             edited=excluded.edited""",
+             edited=excluded.edited, reply_to=excluded.reply_to""",
         (chat_id, msg_id, date, sender_id, sender_name, text,
-         norm, has_media, edited),
+         norm, has_media, edited, reply_to),
     )
     conn.execute(
         "INSERT INTO messages_fts(rowid, text_norm) VALUES (?, ?)",
@@ -409,12 +506,13 @@ def _expand_date(d, end=False):
 
 def search(conn, phrases, chat_ids=None, sender=None,
           date_from=None, date_to=None, require_all=True, limit=200,
-          bookmarked=None):
+          bookmarked=None, min_msg_id=None):
     """Search normalized text. Returns list of dict rows, newest first.
 
     phrases      - list of raw strings (will be normalized)
     require_all  - True: AND all phrases. False: OR, more matches = higher rank.
     bookmarked   - True: only bookmarked messages. False/None: all messages.
+    min_msg_id   - only messages with msg_id > this (incremental pipelines).
     """
     # Trigram tokenizer requires >= 3 chars per phrase; drop shorter ones.
     norm = [normalize_text(p) for p in phrases
@@ -457,6 +555,9 @@ def search(conn, phrases, chat_ids=None, sender=None,
         params.append(_expand_date(date_to, end=True))
     if bookmarked:
         query += " AND b.chat_id IS NOT NULL"
+    if min_msg_id is not None:
+        query += " AND m.msg_id > ?"
+        params.append(int(min_msg_id))
 
     query += " ORDER BY rank LIMIT ?"
     params.append(limit)

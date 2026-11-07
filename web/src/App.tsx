@@ -6,6 +6,8 @@ import { SearchBar } from "./components/SearchBar";
 import { FilterBar } from "./components/FilterBar";
 import { Feed } from "./components/Feed";
 import { BookmarksView } from "./components/BookmarksView";
+import { DealsView } from "./components/DealsView";
+import { ResearchView } from "./components/ResearchView";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { AiPanel } from "./components/AiPanel";
 import { JobCenter } from "./components/JobCenter";
@@ -61,6 +63,10 @@ export default function App() {
         <main className="center">
           {mode === "bookmarks" ? (
             <BookmarksView />
+          ) : mode === "deals" ? (
+            <DealsView />
+          ) : mode === "research" ? (
+            <ResearchView />
           ) : (
             <>
               <SearchBar />

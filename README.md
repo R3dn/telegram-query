@@ -40,6 +40,13 @@ Telegram session never leave it.
 - **Keep what matters** — star messages, attach private notes (never sent
   to AI), save searches under a name and re-run them any time, and open any
   message in its original Telegram chat with verified deep links.
+- **Deals extractor** — offers inside your groups become typed rows (vendor,
+  code, discount, expiry) with per-row citations, cross-group dedupe,
+  evidence-derived status, human confirm/correct controls, and optional
+  incremental extraction after each sync.
+- **Research briefs** — ask a question over selected groups and dates, get
+  a saved, citation-validated, re-runnable brief with version history and
+  deterministic staleness tracking.
 - **Works with zero groups on day one** — a built-in wizard walks you
   through API credentials, Telegram login (phone + code + 2FA), group
   selection, and your first sync.

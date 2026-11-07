@@ -3,6 +3,58 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0] - 2026-11-07
+
+Remember + Research: the archive becomes structured, evidence-linked
+knowledge. A shared AI-task layer keeps every AI feature provider-agnostic,
+cached, schema-validated, and honest about failures.
+
+### Added
+- **Deals extractor**: commercial offers pulled out of your groups as typed
+  rows (vendor, discount, price, currency, promo code, eligibility, geo,
+  validity dates) with per-row citations to the original messages. Bilingual
+  Arabic/English extraction; forwarded copies of the same offer merge with
+  all their sources; offers never merge on loose similarity. Status is
+  evidence-derived (active / expired / upcoming / unverified / unknown) and
+  kept distinguishable from the model's own judgment; offers without
+  validity evidence are never silently "active". Extraction runs as a
+  visible background job over a scope, or incrementally after each sync
+  (opt-in toggle) using per-chat watermarks; batch results are cached by
+  source fingerprint so unchanged messages are never re-sent; malformed
+  model output gets exactly one repair attempt and is otherwise discarded.
+  The Deals workspace adds search, status/category/group/date filters,
+  sorting, confidence labels (qualitative - never fake probabilities),
+  human confirm/dismiss, expiry correction, manual add (human-confirmed by
+  design), and Markdown/JSON export.
+- **Research briefs**: ask a question, pick groups + a date scope, get a
+  structured, citation-linked brief (saved, re-runnable, versioned - old
+  versions are preserved). Retrieval expands context with reply targets
+  (captured going forward via the new `messages.reply_to`) and near-in-time
+  neighbors; every `[n]` citation is validated on the backend and
+  unresolvable markers are stripped and reported. **Staleness is
+  deterministic**: a badge counts scope-matching messages archived after
+  the last run - the provider is never called when you open a brief.
+  Briefs support re-run, rename, personal notes, delete, version history,
+  provenance (model + prompt version), and MD/JSON export with citations.
+- **AI task layer** (`ai_tasks.py`): one provider runner for all structured
+  AI workflows - capability-aware (no JSON-mode assumptions), fence-
+  tolerant parsing, schema validation with a single repair attempt,
+  provider retries with backoff+jitter, per-fingerprint result caching,
+  request/token usage recording per task, and versioned prompts whose
+  version is stored with every output. Features stay functional without a
+  provider and fail with honest errors.
+- Post-sync hook seam now powers optional incremental deals extraction.
+- Exports for deals and briefs (MD + JSON, citations and Telegram links
+  preserved).
+
+### Changed
+- Ask-AI scope handling and the research keyword extraction share the
+  provider abstraction; response parsing tolerates fences everywhere.
+- Schema v4: `deals`, `deal_sources`, `briefs`, `brief_versions`,
+  `brief_citations`, `ai_task_cache`, `ai_usage`, plus `messages.reply_to`
+  capture (additive-only migrations; bookmarks/deal sources/brief
+  citations cascade on message deletion).
+
 ## [0.4.0] - 2026-11-07
 
 Strengthen the core: automatic sync, AI scope control, deep links,

@@ -68,7 +68,8 @@ def message_one(chat_id: int, msg_id: int):
     with open_db() as conn:
         row = conn.execute(
             """SELECT m.chat_id, m.msg_id, m.date, m.sender_id, m.sender_name,
-                      m.text, m.has_media, m.edited, c.title AS chat_title,
+                      m.text, m.has_media, m.edited, m.reply_to,
+                      c.title AS chat_title,
                       c.username AS chat_username,
                       (b.chat_id IS NOT NULL) AS bookmarked,
                       b.note AS bookmark_note

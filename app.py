@@ -22,14 +22,17 @@ from fastapi.staticfiles import StaticFiles
 import auth as tg_auth
 import config
 import db
+import deals
 import jobs
 import scheduler
 from api import ai as ai_api
 from api import archive, general, groups
 from api import auth as auth_api
 from api import bookmarks as bookmarks_api
+from api import deals as deals_api
 from api import exports as exports_api
 from api import jobs as jobs_api
+from api import research as research_api
 from api import saved as saved_api
 from api import scheduler as scheduler_api
 from api import setup as setup_api
@@ -68,6 +71,10 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=scheduler.run_loop, daemon=True,
                      name="tgq-scheduler").start()
     _start_reindex_if_needed()
+    # v0.5: incremental deals extraction after each sync (no-op unless the
+    # user enabled it; runs inside the sync job thread, never the UI thread)
+    if deals.post_sync_hook not in jobs.POST_SYNC_HOOKS:
+        jobs.POST_SYNC_HOOKS.append(deals.post_sync_hook)
     yield
 
 
@@ -78,7 +85,7 @@ app = FastAPI(title="Telegram Query", version=config.__version__,
 for router in (general.router, auth_api.router, archive.router,
                ai_api.router, groups.router, jobs_api.router, setup_api.router,
                scheduler_api.router, saved_api.router, bookmarks_api.router,
-               exports_api.router):
+               exports_api.router, deals_api.router, research_api.router):
     app.include_router(router)
 
 

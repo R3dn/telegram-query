@@ -36,9 +36,10 @@ class JobRunner:
 
     def start(self, name, func, front=False):
         """Enqueue a job: runs immediately when idle, else after current ones.
-        sync/dialogs are deduped; front=True jumps ahead of other queued jobs."""
+        sync/dialogs/extract/brief are deduped; front=True jumps ahead of
+        other queued jobs."""
         with self.lock:
-            if name in ("sync", "dialogs"):
+            if name in ("sync", "dialogs", "extract", "brief"):
                 if (self.running and self.name == name) or \
                         any(n == name for n, _ in self.queue):
                     return False
@@ -169,3 +170,34 @@ def fetch_dialogs_job():
     result = asyncio.run(fetch_dialogs())
     DIALOGS_CACHE["list"] = result
     return result
+
+
+def run_extract_job(chat_ids=None, date_from=None, date_to=None):
+    """Deals extraction over a scope (backfill), as a visible job."""
+    import deals
+    conn = db_get_db()
+    try:
+        print(f"[deals] extracting offers (scope: "
+              f"{len(chat_ids) if chat_ids else 'all'} group(s)"
+              f"{', {date_from}..{date_to}' if date_from or date_to else ''})")
+        deals.extract(conn, chat_ids=chat_ids, date_from=date_from,
+                      date_to=date_to)
+    finally:
+        conn.close()
+
+
+def run_brief_job(brief_id):
+    """Generate a research brief as a visible job. The brief row itself is
+    persisted first (api/research.py), so a restart just needs a re-run."""
+    import research
+    conn = db_get_db()
+    try:
+        research.generate(conn, brief_id)
+    finally:
+        conn.close()
+
+
+def db_get_db():
+    # local import to avoid a circular module dependency at load time
+    import db
+    return db.get_db()

@@ -43,6 +43,80 @@ export interface SchedulerState {
   last_success: string | null;
 }
 
+export interface DealSource {
+  chat_id: number;
+  msg_id: number;
+  text: string | null;
+  date: string | null;
+  sender_name: string | null;
+  chat_title: string | null;
+  tg_link: string | null;
+  missing: boolean;
+}
+
+export interface Deal {
+  id: number;
+  title: string;
+  description: string;
+  category: string | null;
+  vendor: string | null;
+  discount_pct: number | null;
+  price: number | null;
+  currency: string | null;
+  promo_code: string | null;
+  eligibility: string | null;
+  geo: string | null;
+  valid_from: string | null;
+  expires: string | null;
+  status: string;
+  user_status: string | null;   // confirmed | dismissed | null
+  confidence: number | null;
+  derived_status: string;
+  confidence_label: string;
+  human_added: boolean;
+  last_seen: string;
+  sources: DealSource[];
+}
+
+export interface DealsSettings {
+  auto: boolean;
+  categories: string[];
+  vendors: string[];
+  watermark: Record<string, number>;
+}
+
+export interface BriefCitation {
+  idx: number;
+  chat_id: number;
+  msg_id: number;
+  excerpt: string;
+  text: string;
+  date: string;
+  sender_name: string | null;
+  chat_title: string;
+  tg_link: string | null;
+}
+
+export interface Brief {
+  id: number;
+  question: string;
+  chat_ids: number[];
+  date_from: string | null;
+  date_to: string | null;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  latest: {
+    version: number;
+    created_at: string;
+    model: string;
+    prompt_version: string;
+    answer_md: string;
+    citations: BriefCitation[];
+  } | null;
+  stale_count: number;
+}
+
 export interface AskScope {
   chat_ids: number[];
   date_from: string | null;

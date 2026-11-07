@@ -109,6 +109,7 @@ def store_message(conn, chat_id, msg):
         conn, chat_id, msg.id, date, msg.sender_id, sender_name(msg), msg_text(msg),
         has_media=1 if getattr(msg, "media", None) else 0,
         edited=1 if getattr(msg, "edit_date", None) else 0,
+        reply_to=getattr(msg, "reply_to_msg_id", None),
     )
 
 

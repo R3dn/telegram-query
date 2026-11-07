@@ -43,6 +43,13 @@ def api_client():
         c.execute("DELETE FROM chats")
         c.execute("DELETE FROM bookmarks")
         c.execute("DELETE FROM saved_searches")
+        c.execute("DELETE FROM deal_sources")
+        c.execute("DELETE FROM deals")
+        c.execute("DELETE FROM brief_citations")
+        c.execute("DELETE FROM brief_versions")
+        c.execute("DELETE FROM briefs")
+        c.execute("DELETE FROM ai_task_cache")
+        c.execute("DELETE FROM ai_usage")
         # NOTE: DELETE FROM an external-content FTS table is a no-op -
         # rebuild the index instead, or stale entries resurface once the
         # content table reuses rowids (cross-test contamination).

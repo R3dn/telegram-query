@@ -24,7 +24,7 @@ load_dotenv(APP_ROOT / ".env")
 
 ENV_FILE = APP_ROOT / ".env"   # written by the setup wizard; tests redirect this
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 
 def _env(*names: str, default: str = "") -> str:

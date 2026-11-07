@@ -70,8 +70,25 @@ export function jobLabel(name: string | null | undefined): string {
       dialogs: "Group listing",
       auth: "Login",
       reindex: "Reindex",
+      extract: "Deals extraction",
+      brief: "Research brief",
     } as Record<string, string>
   )[name ?? ""] ?? "Job";
+}
+
+/** Status chip color class for derived deal states. */
+export function statusTone(status: string): string {
+  return (
+    {
+      active: "good",
+      confirmed: "good",
+      upcoming: "warn",
+      unverified: "warn",
+      unknown: "",
+      expired: "err",
+      dismissed: "err",
+    } as Record<string, string>
+  )[status] ?? "";
 }
 
 /** Human label for a scheduler interval in minutes. */

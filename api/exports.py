@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 import db
@@ -156,3 +156,132 @@ def export_ai_answer(req: AiExportRequest):
             lines.append(f"   [Open in Telegram]({r['tg_link']})")
     return _download("\n".join(lines),
                      f"telegram-query-ai-answer-{_today()}.md", "text/markdown")
+
+
+@router.get("/api/export/deals")
+def export_deals(format: str = "md"):
+    """All deals + their sources (structured knowledge records)."""
+    import deals as deals_mod
+    with open_db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM deals ORDER BY last_seen DESC").fetchall()]
+        sources = {}
+        for d in rows:
+            src = conn.execute(
+                """SELECT s.chat_id, s.msg_id, m.text, m.date, m.sender_name,
+                          c.title AS chat_title, c.username AS chat_username
+                   FROM deal_sources s
+                   LEFT JOIN messages m ON m.chat_id = s.chat_id AND m.msg_id = s.msg_id
+                   LEFT JOIN chats c   ON c.chat_id = m.chat_id
+                   WHERE s.deal_id=? ORDER BY m.date DESC""", (d["id"],)).fetchall()
+            sources[d["id"]] = []
+            for s in src:
+                sd = dict(s)
+                sd["tg_link"] = db.message_link(
+                    sd["chat_id"], sd.pop("chat_username"), sd["msg_id"])
+                sources[d["id"]].append(sd)
+            d["derived_status"] = deals_mod.derived_status(d)
+            d["confidence_label"] = deals_mod.confidence_label(d.get("confidence"))
+
+    if format == "json":
+        for d in rows:
+            d["sources"] = sources[d["id"]]
+        data = {"exported_at": datetime.now(timezone.utc).isoformat(),
+                "count": len(rows), "deals": rows}
+        return _download(json.dumps(data, ensure_ascii=False, indent=2),
+                         f"telegram-query-deals-{_today()}.json",
+                         "application/json")
+
+    lines = ["# Telegram Query - Deals", "",
+             f"Exported {_today()} (UTC) - {len(rows)} deal(s).", ""]
+    for d in rows:
+        bits = [f"## {d['title']}"]
+        meta = []
+        if d.get("vendor"):
+            meta.append(f"vendor: {d['vendor']}")
+        if d.get("promo_code"):
+            meta.append(f"code: **{d['promo_code']}**")
+        if d.get("discount_pct") is not None:
+            meta.append(f"{d['discount_pct']:g}% off")
+        if d.get("price") is not None:
+            meta.append(f"{d['price']:g} {d.get('currency') or ''}".strip())
+        if d.get("expires"):
+            meta.append(f"expires: {d['expires']}")
+        meta.append(f"status: {d['derived_status']}"
+                    + (" (confirmed)" if d.get("user_status") == "confirmed" else ""))
+        bits.append(" · ".join(meta))
+        if d.get("description"):
+            bits.append(f"\n{d['description']}")
+        for s in sources[d["id"]]:
+            date = (s["date"] or "")[:10]
+            src_txt = (s["text"] or "").splitlines()
+            first = src_txt[0][:140] if src_txt else "[no text]"
+            bits.append(f"- {_md_escape(s['chat_title'] or '?')} · {date}: "
+                        f"{_md_escape(first)}"
+                        + (f" ([Telegram]({s['tg_link']}))" if s["tg_link"] else ""))
+        lines.append("\n".join(bits) + "\n")
+    return _download("\n".join(lines),
+                     f"telegram-query-deals-{_today()}.md", "text/markdown")
+
+
+@router.get("/api/export/briefs/{brief_id}")
+def export_brief(brief_id: int, format: str = "md"):
+    """One research brief + validated citations + metadata."""
+    import research
+    with open_db() as conn:
+        brief = research.get_brief(conn, brief_id)
+        if not brief:
+            return JSONResponse({"error": "brief not found"}, status_code=404)
+        ver = research.latest_version(conn, brief_id)
+        if not ver:
+            return JSONResponse(
+                {"error": "this brief has no generated version yet"},
+                status_code=400)
+        citations = research.version_citations(conn, ver["id"])
+        scope = json.loads(brief["chat_ids"] or "[]")
+        stale = research.staleness(conn, brief_id)
+
+    if format == "json":
+        data = {
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "brief": {
+                "id": brief["id"], "question": brief["question"],
+                "chat_ids": scope, "date_from": brief["date_from"],
+                "date_to": brief["date_to"], "notes": brief["notes"],
+                "created_at": brief["created_at"],
+                "updated_at": brief["updated_at"],
+            },
+            "version": {
+                "version": ver["version"], "answer_md": ver["answer_md"],
+                "keywords": json.loads(ver["keywords"] or "[]"),
+                "model": ver["model"], "prompt_version": ver["prompt_version"],
+                "created_at": ver["created_at"],
+            },
+            "stale_count": stale,
+            "citations": [{k: v for k, v in c.items()} for c in citations],
+        }
+        return _download(json.dumps(data, ensure_ascii=False, indent=2),
+                         f"telegram-query-brief-{brief_id}-{_today()}.json",
+                         "application/json")
+
+    scope_txt = f"{len(scope)} group(s)"
+    if brief["date_from"] or brief["date_to"]:
+        scope_txt += f" · {brief['date_from'] or '…'} → {brief['date_to'] or '…'}"
+    lines = ["# Telegram Query - Research brief", "",
+             f"## {brief['question']}", "",
+             f"_Version {ver['version']} · generated {ver['created_at'][:10]} "
+             f"by {ver['model']} · staleness: "
+             f"{stale} new matching message(s) since_",
+             f"_Scope: {scope_txt}_", ""]
+    lines.append(ver["answer_md"])
+    lines += ["", "## Citations", ""]
+    for c in citations:
+        date = (c["date"] or "")[:10]
+        lines.append(f"[{c['idx']}] **{_md_escape(c['chat_title'])} · {date} · "
+                     f"{_md_escape(c['sender_name'] or 'unknown')}**"
+                     + (f" ([Telegram]({c['tg_link']}))" if c.get("tg_link") else ""))
+        for ln in (c["text"] or "").splitlines()[:4] or [""]:
+            lines.append(f"> {ln}")
+    return _download("\n".join(lines),
+                     f"telegram-query-brief-{brief_id}-{_today()}.md",
+                     "text/markdown")

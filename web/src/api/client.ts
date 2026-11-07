@@ -4,7 +4,10 @@ import type {
   AskResult,
   AskScope,
   AuthState,
+  Brief,
   BookmarkRow,
+  Deal,
+  DealsSettings,
   Dialog,
   FeedPage,
   Group,
@@ -147,6 +150,54 @@ export const api = {
   }) => download("/api/export/ai-answer", {
     method: "POST", body: JSON.stringify(p),
   }),
+
+  // deals (v0.5)
+  deals: (p?: {
+    status?: string; category?: string; vendor?: string; group?: string;
+    q?: string; from?: string; to?: string; sort?: string;
+  }) => {
+    const q = new URLSearchParams();
+    if (p?.status) q.set("status", p.status);
+    if (p?.category) q.set("category", p.category);
+    if (p?.vendor) q.set("vendor", p.vendor);
+    if (p?.group) q.set("group", p.group);
+    if (p?.q) q.set("q", p.q);
+    if (p?.from) q.set("from_", p.from);
+    if (p?.to) q.set("to", p.to);
+    if (p?.sort) q.set("sort", p.sort);
+    return req<Deal[]>(`/api/deals${q.size ? `?${q}` : ""}`);
+  },
+  dealPatch: (id: number, p: Record<string, unknown>) =>
+    patch<Deal>(`/api/deals/${id}`, p),
+  dealDelete: (id: number) =>
+    req<{ ok: boolean }>(`/api/deals/${id}`, { method: "DELETE" }),
+  dealAdd: (p: Record<string, unknown>) => post<Deal>("/api/deals", p),
+  dealsExtract: (p: { chat_ids: number[]; date_from?: string | null; date_to?: string | null }) =>
+    post<{ started: boolean }>("/api/deals/extract", p),
+  dealsSettings: () => req<DealsSettings>("/api/deals/settings"),
+  dealsAuto: (enabled: boolean) =>
+    post<{ auto: boolean }>("/api/deals/auto", { enabled }),
+  exportDeals: (format: "md" | "json") =>
+    download(`/api/export/deals?format=${format}`),
+
+  // research briefs (v0.5)
+  briefs: () => req<Brief[]>("/api/briefs"),
+  briefCreate: (p: {
+    question: string; chat_ids: number[];
+    date_from?: string | null; date_to?: string | null;
+  }) => post<{ id: number; queued: boolean }>("/api/briefs", p),
+  briefGet: (id: number) => req<Brief>(`/api/briefs/${id}`),
+  briefPatch: (id: number, p: Record<string, unknown>) =>
+    patch<Brief>(`/api/briefs/${id}`, p),
+  briefRegenerate: (id: number) =>
+    post<{ queued: boolean }>(`/api/briefs/${id}/regenerate`),
+  briefDelete: (id: number) =>
+    req<{ ok: boolean }>(`/api/briefs/${id}`, { method: "DELETE" }),
+  briefVersions: (id: number) =>
+    req<{ version: number; created_at: string; model: string }[]>(
+      `/api/briefs/${id}/versions`),
+  exportBrief: (id: number, format: "md" | "json") =>
+    download(`/api/export/briefs/${id}?format=${format}`),
 
   // groups management
   dialogsGet: () => req<{ ready: boolean; dialogs?: Dialog[] }>("/api/dialogs"),

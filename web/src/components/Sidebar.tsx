@@ -86,6 +86,16 @@ export function Sidebar() {
         </button>
       </nav>
 
+      <div className="side-nav side-nav-group">
+        <span className="label">Knowledge</span>
+        <button className={`nav-item ${mode === "deals" ? "on" : ""}`} onClick={() => setMode("deals")}>
+          <span className="nav-ic">🏷</span> Deals
+        </button>
+        <button className={`nav-item ${mode === "research" ? "on" : ""}`} onClick={() => setMode("research")}>
+          <span className="nav-ic">🔬</span> Research
+        </button>
+      </div>
+
       <div className="side-section">
         <div className="side-head">
           <span className="label">Groups</span>
