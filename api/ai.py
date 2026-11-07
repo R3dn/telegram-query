@@ -15,11 +15,22 @@ from pydantic import BaseModel, Field
 import ai
 import config
 
+from . import open_db
+
 router = APIRouter()
+
 
 log = logging.getLogger("tgq")
 
 MAX_QUESTION_CHARS = 2000
+
+
+@router.get("/api/ai/usage")
+def ai_usage():
+    """Local usage statistics per AI task (requests + tokens)."""
+    import ai_tasks
+    with open_db() as conn:
+        return ai_tasks.usage_stats(conn)
 
 
 class AskScope(BaseModel):

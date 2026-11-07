@@ -119,3 +119,11 @@ def test_fingerprint_stable_and_sensitive(conn):
     assert ai_tasks.fingerprint_rows(changed) != ai_tasks.fingerprint_rows(rows)
     assert ai_tasks.scope_hash("a", {"x": 1}) == ai_tasks.scope_hash("a", {"x": 1})
     assert ai_tasks.scope_hash("a", {"x": 1}) != ai_tasks.scope_hash("a", {"x": 2})
+
+
+def test_usage_endpoint(api_client):
+    r = api_client.get("/api/ai/usage")
+    assert r.status_code == 200
+    body = r.json()
+    assert "total" in body and "by_task" in body
+    assert body["total"]["requests"] >= 0

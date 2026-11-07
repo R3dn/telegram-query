@@ -159,6 +159,20 @@ ruff check . && pytest
 cd web && npm install && npm run typecheck && npm test && npm run build
 ```
 
+**End-to-end** (real app + deterministic mock AI provider + synthetic
+archive - no real Telegram/LLM/keys):
+
+```bash
+python scripts/seed_demo.py --path data/e2e.db --messages 400
+python scripts/mock_ai_server.py --port 8124 &
+TG_DB_PATH=$PWD/data/e2e.db TG_SESSION_PATH=$PWD/data/e2e-session \
+  TG_API_ID=123456 TG_API_HASH=e2e AI_BASE_URL=http://127.0.0.1:8124/v1 \
+  AI_API_KEY=e2e AI_MODEL=e2e-mock PORT=8123 python app.py &
+python scripts/e2e_test.py --base http://127.0.0.1:8123 --db data/e2e.db
+```
+
+CI runs the same suite on every push.
+
 Automated suites cover the DB/migrations, bilingual + Gulf/Arabizi search
 normalization, sync checkpoints and resume, the job queue, the auto-sync
 scheduler, the AI pipeline and scope (with a mocked provider - no real

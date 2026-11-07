@@ -294,6 +294,17 @@ def ask(conn, question, max_results=None, scope=None):
     else:
         user_msg = f"Today: {today}\n\nQuestion: {question}\n\nMessages:\n{context}"
     answer = _chat(client, SYSTEM_ANSWER, user_msg)
+    # usage accounting for the ask pipeline (requests; tokens when reported)
+    try:
+        import ai_tasks
+        uconn = db.get_db()
+        try:
+            ai_tasks.record_usage(uconn, "ask", attempts + 1, None, None)
+            uconn.commit()
+        finally:
+            uconn.close()
+    except Exception:  # noqa: BLE001 - accounting must never break asking
+        pass
     return {"answer": answer, "sources": context_rows, "attempts": attempts,
             "keywords_tried": tried_keyword_sets, "fallback": fallback,
             "scope": {"chat_ids": scope_ids or [], "date_from": s_from,

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
-import type { SchedulerState } from "../api/types";
+import type { AiUsage, SchedulerState } from "../api/types";
 import { fmtLocal } from "../utils/format";
 import { Modal } from "./Modal";
 import { AiProviderForm, CredsForm } from "./SetupForms";
@@ -23,9 +23,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [editing, setEditing] = useState<null | "telegram" | "ai">(null);
   const [sched, setSched] = useState<SchedulerState | null>(null);
   const [schedBusy, setSchedBusy] = useState(false);
+  const [usage, setUsage] = useState<AiUsage | null>(null);
 
   useEffect(() => {
     api.schedulerState().then(setSched).catch(() => { /* ignore */ });
+    api.aiUsage().then(setUsage).catch(() => { /* ignore */ });
   }, []);
 
   const applySched = async (p: { enabled?: boolean; interval_min?: number }) => {
@@ -183,6 +185,20 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="settings-edit">
           <AiProviderForm onSaved={credsSaved} submitLabel="Save provider" />
         </div>
+      )}
+      <div className="settings-row">
+        <span>AI usage (this machine)</span>
+        <span className="badge" title="Requests and estimated tokens recorded locally per AI feature">
+          {usage
+            ? `${usage.total.requests} request${usage.total.requests === 1 ? "" : "s"} · ~${(usage.total.tokens_in ?? 0) + (usage.total.tokens_out ?? 0)} tokens`
+            : "…"}
+        </span>
+      </div>
+      {usage && Object.keys(usage.by_task).length > 0 && (
+        <p className="mm-note dim">
+          {Object.entries(usage.by_task).map(([task, u]) =>
+            `${task}: ${u.requests}`).join(" · ")}
+        </p>
       )}
       <p className="mm-note dim">
         AI answers send retrieved message excerpts to the configured provider

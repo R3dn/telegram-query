@@ -203,6 +203,11 @@ export interface Faq {
   source_questions: FaqSource[];
 }
 
+export interface AiUsage {
+  by_task: Record<string, { requests: number; tokens_in: number | null; tokens_out: number | null }>;
+  total: { requests: number; tokens_in: number | null; tokens_out: number | null };
+}
+
 export interface AskScope {
   chat_ids: number[];
   date_from: string | null;

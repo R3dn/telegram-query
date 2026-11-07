@@ -1,5 +1,6 @@
 /** Thin fetch wrapper: JSON, error extraction, no secrets ever leave here. */
 import type {
+  AiUsage,
   Alert,
   AppState,
   AskResult,
@@ -112,6 +113,7 @@ export const api = {
   // ai
   ask: (question: string, scope?: AskScope) =>
     post<AskResult>("/api/ask", { question, scope: scope ?? null }),
+  aiUsage: () => req<AiUsage>("/api/ai/usage"),
 
   // bookmarks + notes (v0.4)
   bookmarks: (p?: { q?: string; groups?: number[] }) => {
