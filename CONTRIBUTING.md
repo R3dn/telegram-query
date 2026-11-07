@@ -34,6 +34,20 @@ built `web/dist` is committed, so backend-only contributors can skip it).
 6. For UI work, match the existing design tokens (`web/src/design/`) —
    restrained palette, one accent, small radii, no gradients.
 
+## Screenshots for visual changes
+
+After UI changes, regenerate the README screenshots with synthetic data only:
+
+```bash
+pip install playwright && python -m playwright install chromium
+python scripts/take_screenshots.py
+```
+
+The script seeds a throwaway demo archive (ten fictional English groups via
+`scripts/seed_demo.py`), boots an isolated app instance whose environment
+blocks your real `.env`, and fails if any real identifier appears in a
+capture. Never screenshot your real archive for the docs.
+
 ## Pull requests
 
 - One logical change per PR; describe *why*, not just *what*.

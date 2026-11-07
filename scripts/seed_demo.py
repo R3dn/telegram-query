@@ -1,12 +1,13 @@
 """Seed a synthetic demo archive so the UI can be explored without Telegram.
 
-Creates (or replaces) a demo database with two fictional groups and a few
-hundred mixed Arabic/English messages, then prints how to run the app
+Creates (or replaces) a demo database with ten fictional English-speaking
+groups and a few hundred fake messages, then prints how to run the app
 against it. Never touches your real database.
 
 Usage:
     python scripts/seed_demo.py            # data/demo.db
     python scripts/seed_demo.py --path my_demo.db
+    python scripts/seed_demo.py --messages 800
 
 Run the app against it:
     TG_DB_PATH=data/demo.db TG_SESSION_PATH=data/demo python app.py
@@ -23,46 +24,62 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import db  # noqa: E402
 
+# Ten fictional groups (all English, all fake - no real communities).
+GROUPS = [
+    (-10012340001, "Tech Deals & Gadgets", "techdealsdemo", "channel"),
+    (-10012340002, "Weekend Hikers", "weekendhikers", "group"),
+    (-10012340003, "Home Cooking Club", None, "group"),
+    (-10012340004, "Photography Enthusiasts", "photoclub", "group"),
+    (-10012340005, "Board Game Nights", None, "group"),
+    (-10012340006, "Crypto & Finance Talk", "financetalk", "channel"),
+    (-10012340007, "Fitness Motivation", None, "group"),
+    (-10012340008, "Indie Game Devs", "indiegamedevs", "group"),
+    (-10012340009, "Coffee Lovers", "coffeelovers", "channel"),
+    (-10012340010, "Volunteer Network", None, "group"),
+]
+
 SENDERS = [
-    ("@sara_dev", "سارة (Sara)"),
-    ("@omar_k", "Omar K."),
-    ("@lina_hikes", "لينا (Lina)"),
-    ("@dave", "Dave"),
-    ("@faisal_z", "فيصل (Faisal)"),
-    ("@maya", "Maya"),
+    "Sara (sara_dev)", "Omar K.", "Dave", "Maya", "Jules",
+    "Pete T.", "Lena C.", "Marc B.", "Kim", "Trail Mix",
 ]
 
 DEALS = [
+    ("GadgetHub Store", "Laptop sleeves 30% off with code SLEEVE30", "SLEEVE30"),
     ("Pizza Palace", "Buy one get one free on all large pizzas, code PALACE2", "PALACE2"),
-    ("Burger Barn", "20% off app orders this weekend", None),
-    ("سوق الخضار", "خصم 15% على جميع المنتجات يوم الجمعة فقط", "GREEN15"),
-    ("Coffee Corner", "Free upgrade to large on any latte", None),
-    ("شاورما هاوس", "وجبة شاورما بـ 12 ريال بدل 18، اليوم فقط", None),
-    ("TechHub Store", "Laptop sleeves 30% off with code SLEEVE30", "SLEEVE30"),
+    ("Bean & Brew", "Free size upgrade on any latte this Friday", None),
+    ("Runner's Corner", "20% discount on all trail shoes this weekend", "TRAIL20"),
+    ("PixelPrints", "Photo prints half price, code FRAMES50", "FRAMES50"),
+    ("Tabletop Toys", "Board game bundle deal - 3 games for $45", None),
+    ("KeyCrunch Coffee", "Subscription discount code WAKEUP15 for new members", "WAKEUP15"),
+    ("FitGear Online", "Resistance bands deal - 40% off with code BAND40", "BAND40"),
 ]
 
 CHAT = [
-    "Has anyone tried the new hiking trail near المفتل؟",
-    "the sunset from the northern ridge was incredible yesterday 🌄",
-    "أفضل وقت للوصول هو قبل الساعة ٧ صباحاً",
-    "Bringing extra water is a must in summer — learned that the hard way",
-    " trail conditions report: muddy after rain, take the eastern path",
-    "من معي يوم السبت للنزهة؟",
-    "Parking fills up by 8am on weekends fyi",
-    "شفت الغزلان قرب المحطة الثالثة 🦌",
-]
-
-HISTORY = [
-    "anyone have the maintenance schedule PDF for the 2023 model?",
-    "the dealership quoted me 480 for the 40k service — is that normal?",
-    "جدول الصيانة موجود في التطبيق الرسمي",
-    "oil change every 10k km is what the manual says",
-    "I hear a faint whistle above 120 km/h, any ideas?",
-    "صوت الصفير غالباً من طارة المكيف",
-    "check the door seals first, mine had the same issue",
-    "fuel consumption dropped after the software update 📉",
-    "استهلاك البنزين عندي صار أفضل بعد التحديث",
-    "warranty covered the water pump replacement fully 👍",
+    "Has anyone tried the new hiking trail near the north ridge?",
+    "The sunset from the summit was incredible yesterday",
+    "Best time to arrive is before 7am on weekends, parking fills up",
+    "Bringing extra water is a must in summer - learned that the hard way",
+    "Trail conditions report: muddy after rain, take the eastern path",
+    "Who is in for Saturday's meetup?",
+    "Any recommended budget lenses for landscape shots?",
+    "Shot on a 35mm prime, straight out of camera, no edits",
+    "What shutter speed do you use for birds in flight?",
+    "Our next board game night is Friday - bringing the new expansion",
+    "Rules question: can you trade resources during someone else's turn?",
+    "Meal prep Sunday went well - five lunches ready for the week",
+    "Sourdough starter is finally alive after three attempts",
+    "Anyone got a good pancake recipe that does not need buttermilk?",
+    "Finished the first playable build of my puzzle game today",
+    "Unity or Godot for a 2D platformer in 2026?",
+    "Shader compilation times are brutal this week",
+    "Six months into the home gym setup - consistency beats intensity",
+    "New personal record on deadlifts today, small wins add up",
+    "Reminder: volunteer orientation for the food bank is on Thursday",
+    "We still need two more people for the beach cleanup",
+    "DCA is not a strategy, it is a personality type",
+    "Market update: sideways again, expectations unchanged",
+    "The new pour-over kit arrived - this changes everything",
+    "Light roast vs dark roast, the eternal debate returns",
 ]
 
 
@@ -70,7 +87,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Seed a synthetic demo archive")
     ap.add_argument("--path", default=str(
         Path(__file__).resolve().parent.parent / "data" / "demo.db"))
-    ap.add_argument("--messages", type=int, default=400)
+    ap.add_argument("--messages", type=int, default=600)
     args = ap.parse_args()
 
     path = Path(args.path)
@@ -80,32 +97,32 @@ def main() -> None:
 
     conn = db.get_db(str(path))
     rng = random.Random(42)  # deterministic demo content
-    db.upsert_chat(conn, -10012340001, "Tech Deals سر التقنية", "techdealsdemo", "channel")
-    db.upsert_chat(conn, -10012340002, "Weekend Hikers", None, "group")
+    for chat_id, title, username, kind in GROUPS:
+        db.upsert_chat(conn, chat_id, title, username, kind)
 
     now = datetime.now(timezone.utc)
+    per_group = max(1, args.messages // len(GROUPS))
     n = 0
-    for i in range(args.messages):
-        group = -10012340001 if i % 3 else -10012340002
-        sender_handle, sender_name = rng.choice(SENDERS)
-        if group == -10012340001 and rng.random() < 0.45:
-            biz, offer, code = rng.choice(DEALS)
-            text = f"{biz}: {offer}" + (f" — code {code}" if code else "")
-        elif group == -10012340001:
-            text = rng.choice(HISTORY)
-        else:
-            text = rng.choice(CHAT)
-        msg_id = 1000 + i
-        date = (now - timedelta(minutes=i * 37)).isoformat()
-        db.upsert_message(conn, group, msg_id, date, 70000 + rng.randint(1, 9),
-                         sender_name, text,
-                         has_media=1 if rng.random() < 0.12 else 0,
-                         edited=1 if rng.random() < 0.04 else 0)
-        n += 1
+    for gi, (chat_id, _, _, kind) in enumerate(GROUPS):
+        for i in range(per_group):
+            sender = rng.choice(SENDERS)
+            if kind == "channel" or rng.random() < 0.30:
+                biz, offer, code = rng.choice(DEALS)
+                text = f"{biz}: {offer}" + (f" - code {code}" if code else "")
+            else:
+                text = rng.choice(CHAT)
+            msg_id = 1000 + gi * 1000 + i
+            date = (now - timedelta(minutes=(gi * per_group + i) * 17)).isoformat()
+            db.upsert_message(conn, chat_id, msg_id, date,
+                              70000 + rng.randint(1, 40), sender, text,
+                              has_media=1 if rng.random() < 0.10 else 0,
+                              edited=1 if rng.random() < 0.04 else 0)
+            n += 1
     conn.commit()
 
     # pretend history is fully synced so no "backfill pending" states show
-    conn.execute("UPDATE chats SET last_msg_id=1400, backfill_floor=0")
+    conn.execute(
+        f"UPDATE chats SET last_msg_id={1000 + 999}, backfill_floor=0")
     conn.commit()
 
     s = db.stats(conn)
