@@ -70,7 +70,8 @@ def wait_up(port: int, proc: subprocess.Popen, timeout_s: float = 30) -> None:
             return
         except Exception:
             if proc.poll() is not None:
-                raise SystemExit("screenshot instance died on boot")
+                raise SystemExit(
+                    "screenshot instance died on boot") from None
             time.sleep(0.5)
     raise SystemExit("screenshot instance never came up")
 
