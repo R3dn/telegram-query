@@ -1,46 +1,83 @@
-"""Telegram sync CLI - fetches and incrementally updates group messages.
+"""Telegram sync - fetches and incrementally updates group messages.
 
-Usage:
-  python sync.py                      incremental sync of tracked groups (new messages)
-  python sync.py --days 3            re-fetch last 3 days (edits included) + new messages
+CLI usage:
+  python sync.py                      incremental sync of tracked groups
+  python sync.py --days 3            re-fetch last 3 days (edits included)
   python sync.py --full              backfill entire history of tracked groups
   python sync.py --list              list chats you're in
   python sync.py --track <id> [...]   start tracking chat(s), full backfill
   python sync.py --untrack <id> [...] stop tracking chat(s)
-  python sync.py --interactive       pick groups to track (first run)
+  python sync.py --login             log in to Telegram (interactive) and exit
 
-The web app's "Sync now" button runs the same code with days=SYNC_DAYS (default 3).
+The web app runs the same code through jobs.run_sync_job(); there the client
+connects NON-interactively and fails with a clear error when the account is
+not authenticated (use the web login wizard or `python sync.py --login`).
 """
+from __future__ import annotations
+
 import argparse
 import asyncio
-import os
 import sys
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-import db
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError
-from telethon.tl.types import User, Channel, Chat
+from telethon.tl.types import Channel, Chat, User
 
-API_ID = os.environ.get("TELEGRAM_API_ID")
-API_HASH = os.environ.get("TELEGRAM_API_HASH")
-SESSION = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tg_session")
+import config
+import db
 
 # Set by the web app's "stop" endpoint; checked between messages/chats.
 CANCEL = threading.Event()
 
 
+@dataclass
+class SyncArgs:
+    """What to sync. Built by the CLI (main) or by jobs.run_sync_job()."""
+    list: bool = False
+    track: list[int] | None = None
+    untrack: list[int] | None = None
+    full: bool = False
+    days: int | None = None
+    interactive: bool = False
+    login_interactive: bool = True   # False when run from the web app
+    login: bool = False
+
+
 def need_creds():
-    if not API_ID or not API_HASH:
-        print("Missing TELEGRAM_API_ID / TELEGRAM_API_HASH.")
+    if not config.settings.telegram_configured:
+        print("Missing TG_API_ID / TG_API_HASH.")
         print("Get them from https://my.telegram.org -> API development tools,")
         print("then copy .env.example to .env and fill them in.")
         sys.exit(1)
+
+
+def make_client(login_interactive: bool = True) -> TelegramClient:
+    """Create a client. Async: call `await make_client(...)`.
+
+    login_interactive=True (CLI): `start()` prompts for phone/code.
+    login_interactive=False (web jobs): connect + fail with a clear
+    error if the stored session is not signed in - never prompts.
+    """
+    need_creds()
+    return TelegramClient(str(config.settings.session_path),
+                          int(config.settings.tg_api_id),
+                          config.settings.tg_api_hash)
+
+
+async def connect_client(client: TelegramClient, login_interactive: bool) -> TelegramClient:
+    if login_interactive:
+        await client.start()
+        return client
+    await client.connect()
+    if not await client.is_user_authorized():
+        await client.disconnect()
+        raise RuntimeError(
+            "Telegram account is not authenticated. Log in from the web app "
+            "or run: python sync.py --login")
+    return client
 
 
 def sender_name(msg) -> str:
@@ -204,9 +241,10 @@ async def list_chats(client, conn):
 
 
 async def fetch_dialogs():
-    """List every group/channel dialog as dicts (used by the web UI)."""
-    client = TelegramClient(SESSION, int(API_ID), API_HASH)
-    await client.start()
+    """List every group/channel dialog as dicts (used by the web UI).
+    Runs non-interactively: fails clearly when not logged in."""
+    client = make_client(login_interactive=False)
+    await connect_client(client, login_interactive=False)
     out = []
     try:
         async for d in client.iter_dialogs():
@@ -238,17 +276,21 @@ async def interactive_track(client, conn):
     conn.commit()
 
 
-async def run(args):
+async def run(args: SyncArgs):
     need_creds()
     db.init_db()
     conn = db.get_db()
-    client = TelegramClient(SESSION, int(API_ID), API_HASH)
-
-    await client.start()
-    me = await client.get_me()
-    print(f"Logged in as {me.first_name}")
+    client = make_client(login_interactive=args.login_interactive)
+    await connect_client(client, args.login_interactive)
 
     try:
+        me = await client.get_me()
+        print(f"Logged in as {me.first_name}")
+
+        if args.login:
+            print("Session is valid - the web app can now sync.")
+            return
+
         if args.list:
             await list_chats(client, conn)
         elif args.track:
@@ -299,7 +341,12 @@ def main():
                     help="re-fetch the last N days of messages (edits included)")
     ap.add_argument("--interactive", action="store_true",
                     help="pick groups to track interactively")
-    args = ap.parse_args()
+    ap.add_argument("--login", action="store_true",
+                    help="log in to Telegram interactively, then exit")
+    ns = ap.parse_args()
+    args = SyncArgs(list=ns.list, track=ns.track, untrack=ns.untrack,
+                    full=ns.full, days=ns.days, interactive=ns.interactive,
+                    login_interactive=True, login=ns.login)
 
     need_creds()
     db.init_db()

@@ -1,5 +1,31 @@
+# secrets / personal data
 .env
+
+# telegram session files (any location)
 tg_session*
+*.session
+
+# databases (any location)
 messages.db
 messages.db-*
+data/
+
+# python
 __pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+
+# node / vite (web/dist IS committed: end users run without node)
+web/node_modules/
+web/.vite/
+npm-debug.log*
+
+# logs / os noise
+logs/
+*.log
+.DS_Store
+Thumbs.db

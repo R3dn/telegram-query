@@ -1,0 +1,62 @@
+/* Telegram Query - design tokens.
+   Dark is default; `html.light` switches to the light theme. */
+
+:root {
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue",
+          Arial, "Noto Sans Arabic", sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  --r-s: 6px;
+  --r-m: 8px;
+  --r-l: 12px;
+
+  --sidebar-w: 264px;
+  --right-w: 360px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .25);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, .35);
+}
+
+:root, :root:not(.light) {
+  --bg: #0d0f12;
+  --surface: #14161a;
+  --surface-2: #1b1e23;
+  --surface-3: #22262c;
+  --border: #262a30;
+  --border-soft: #1e2227;
+  --text: #e8eaed;
+  --dim: #9aa1ab;
+  --faint: #6b7280;
+  --accent: #5b8def;
+  --accent-hover: #6f9bf2;
+  --accent-fg: #0b1220;
+  --good: #3fba75;
+  --warn: #e0a44a;
+  --err: #e5534b;
+  --mark: rgba(91, 141, 239, .28);
+  --sel: rgba(91, 141, 239, .12);
+  --scroll: #2c3138;
+}
+
+:root.light {
+  --bg: #f6f7f8;
+  --surface: #ffffff;
+  --surface-2: #eef0f2;
+  --surface-3: #e4e7ea;
+  --border: #dfe2e6;
+  --border-soft: #e9ebee;
+  --text: #1b1e23;
+  --dim: #656b73;
+  --faint: #9aa0a6;
+  --accent: #3b6fe0;
+  --accent-hover: #5081e6;
+  --accent-fg: #ffffff;
+  --good: #1f9d61;
+  --warn: #a87708;
+  --err: #d43d33;
+  --mark: rgba(59, 111, 224, .16);
+  --sel: rgba(59, 111, 224, .09);
+  --scroll: #d0d4d9;
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, .08);
+  --shadow-2: 0 8px 28px rgba(16, 24, 40, .14);
+}

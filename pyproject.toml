@@ -1,0 +1,35 @@
+[project]
+name = "telegram-query"
+version = "0.3.0"
+description = "Local-first, searchable, AI-queryable archive for your Telegram groups"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Telegram Query contributors" }]
+keywords = ["telegram", "search", "archive", "ai", "local-first"]
+# runtime deps are managed in requirements.txt; this metadata is for tooling
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["web", "static"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # import order
+  "B",   # bug-prone patterns
+  "UP",  # pyupgrade
+]
+ignore = [
+  "E501",  # long lines in docstrings/prompts are fine
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]

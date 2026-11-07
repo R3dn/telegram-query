@@ -1,24 +1,24 @@
 """SQLite storage + FTS5 (trigram) search for Telegram messages.
 
 Schema:
-  chats      - tracked Telegram groups/channels + sync state
-  messages   - one row per message, PK (chat_id, msg_id)
-  messages_fts - FTS5 external-content index on messages.text_norm (trigram tokenizer)
+  chats       - tracked Telegram groups/channels + sync state + backfill checkpoints
+  messages    - one row per message, PK (chat_id, msg_id)
+  messages_fts- FTS5 external-content index on messages.text_norm (trigram)
+  schema_meta - migration bookkeeping (schema version)
 
 Search semantics:
   - Each phrase is matched as a substring sequence (trigram) in normalized text.
   - require_all=True  -> phrases are ANDed (classic search box behaviour)
-  - require_all=False -> phrases are ORed, rows matching more phrases rank higher (AI keyword variants)
+  - require_all=False -> phrases are ORed, rows matching more phrases rank higher
 """
-import os
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-DB_PATH = os.environ.get(
-    "TG_DB_PATH",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "messages.db"),
-)
+import config
+
+DB_PATH = config.settings.db_path  # default location; tests pass explicit paths
 
 # ---------------------------------------------------------------------------
 # Text normalization (mixed English/Arabic search quality)
@@ -91,19 +91,44 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 """
 
 
+SCHEMA_VERSION = 2
+
+
+def _migrate(conn):
+    """Versioned, idempotent, additive-only migrations. Never destructive."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS schema_meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+    """)
+    row = conn.execute(
+        "SELECT value FROM schema_meta WHERE key='version'").fetchone()
+    current = int(row["value"]) if row else 1
+    if current < 2:
+        # v2: backfill checkpoint column (no-op when already present)
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(chats)")]
+        if "backfill_floor" not in cols:
+            conn.execute("ALTER TABLE chats ADD COLUMN backfill_floor "
+                         "INTEGER NOT NULL DEFAULT 0")
+        current = 2
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)",
+        (str(current),))
+
+
 def get_db(path: str = None) -> sqlite3.Connection:
-    p = path or DB_PATH
+    p = Path(path) if path else DB_PATH
+    p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(p, timeout=20.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=20000")
-    if p not in _INITIALIZED:
+    if str(p) not in _INITIALIZED:
         conn.executescript(SCHEMA)
-        cols = [r["name"] for r in conn.execute("PRAGMA table_info(chats)")]
-        if "backfill_floor" not in cols:   # migrate existing DBs
-            conn.execute("ALTER TABLE chats ADD COLUMN backfill_floor "
-                         "INTEGER NOT NULL DEFAULT 0")
-        _INITIALIZED.add(p)
+        _migrate(conn)
+        conn.commit()
+        _INITIALIZED.add(str(p))
     return conn
 
 
@@ -199,6 +224,19 @@ def reindex_fts(conn):
     conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
 
 
+def delete_chats_messages(conn, chat_ids):
+    """Permanently delete the archived messages of the given chats and
+    reset their sync state (so a re-track re-backfills from scratch).
+    Rebuilds the FTS index once at the end. Destructive - used only by the
+    explicit 'untrack & delete' action."""
+    for cid in chat_ids:
+        conn.execute("DELETE FROM messages WHERE chat_id=?", (cid,))
+        conn.execute(
+            "UPDATE chats SET last_msg_id=0, backfill_floor=0 WHERE chat_id=?",
+            (cid,))
+    reindex_fts(conn)
+
+
 # ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
@@ -231,7 +269,7 @@ def search(conn, phrases, chat_ids=None, sender=None,
     else:
         match_expr = " OR ".join(fts_quote(p) for p in norm)
 
-    query = f"""
+    query = """
         SELECT m.chat_id, m.msg_id, m.date, m.sender_id, m.sender_name,
                m.text, m.has_media, m.edited, c.title AS chat_title,
                bm25(messages_fts) AS rank
@@ -358,10 +396,17 @@ def recent(conn, chat_ids=None, days=7, limit=500):
 
 
 def stats(conn):
-    n_msgs = conn.execute("SELECT COUNT(*) c FROM messages").fetchone()["c"]
+    """Archive stats. Message counts include only TRACKED chats, so the
+    numbers always match what browse/search/AI can actually see (messages
+    of untracked chats stay on disk but are hidden)."""
+    n_msgs = conn.execute(
+        "SELECT COUNT(*) c FROM messages WHERE chat_id IN "
+        "(SELECT chat_id FROM chats WHERE tracked=1)").fetchone()["c"]
     n_chats = conn.execute(
         "SELECT COUNT(*) c FROM chats WHERE tracked=1").fetchone()["c"]
-    last = conn.execute("SELECT MAX(date) d FROM messages").fetchone()["d"]
+    last = conn.execute(
+        "SELECT MAX(m.date) d FROM messages m JOIN chats c ON c.chat_id = m.chat_id "
+        "WHERE c.tracked=1").fetchone()["d"]
     pending = conn.execute(
         "SELECT COUNT(*) c FROM chats WHERE tracked=1 "
         "AND (backfill_floor > 0 OR last_msg_id = 0)").fetchone()["c"]

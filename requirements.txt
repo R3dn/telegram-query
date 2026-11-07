@@ -1,5 +1,8 @@
-telethon>=1.36
-fastapi>=0.115
-uvicorn>=0.30
-openai>=1.50
-python-dotenv>=1.0
+# Runtime dependencies for Telegram Query.
+# Install with:  pip install -r requirements.txt
+
+telethon>=1.36          # Telegram MTProto client
+fastapi>=0.115          # web API
+uvicorn>=0.30           # server
+openai>=1.50            # any OpenAI-compatible chat endpoint
+python-dotenv>=1.0      # .env loading

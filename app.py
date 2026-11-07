@@ -1,387 +1,114 @@
-"""Local web app: browse/search/AI Q&A over synced Telegram messages.
+"""Telegram Query - local-first, searchable, AI-queryable archive for
+your Telegram groups.
 
 Run:  python app.py   ->  http://127.0.0.1:8000
+
+Never expose this app on a public network without additional auth: the API
+serves your complete message archive and is bound to 127.0.0.1 by default.
+A Host-allowlist middleware additionally blocks cross-origin requests from
+web pages (DNS rebinding / simple-form CSRF against local apps).
 """
-import asyncio
-import collections
-import io
+from __future__ import annotations
+
+import contextlib
+import logging
 import os
-import sys
 import threading
-import time
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-import ai
-import db
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
 
-HOST = os.environ.get("HOST", "127.0.0.1")
-PORT = int(os.environ.get("PORT", "8000"))
-HERE = os.path.dirname(os.path.abspath(__file__))
+import auth as tg_auth
+import config
+import db
+from api import ai as ai_api
+from api import archive, general, groups, jobs
+from api import auth as auth_api
+from api import setup as setup_api
 
-SYNC_DAYS = int(os.environ.get("SYNC_DAYS", "3"))  # rescan window for the UI button
+logging.basicConfig(
+    level=config.settings.log_level,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("tgq")
 
-TELEGRAM_CONFIGURED = bool(os.environ.get("TELEGRAM_API_ID")
-                           and os.environ.get("TELEGRAM_API_HASH"))
+WEB_DIST = config.APP_ROOT / "web" / "dist"
 
-
-# ---------------------------------------------------------------------------
-# Background job runner: jobs run one at a time; extra jobs queue up in order.
-# ---------------------------------------------------------------------------
-
-class JobRunner:
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.running = False
-        self.name = ""
-        self.log = ""
-        self.result = None
-        self.queue = collections.deque()   # [(name, func), ...]
-        self.last_done = None             # {"name", "ok", "finished_at"}
-
-    def start(self, name, func, front=False):
-        """Enqueue a job: runs immediately when idle, else after current ones.
-        sync/dialogs are deduped; front=True jumps ahead of other queued jobs."""
-        with self.lock:
-            if name in ("sync", "dialogs"):
-                if (self.running and self.name == name) or \
-                        any(n == name for n, _ in self.queue):
-                    return False
-            if front:
-                self.queue.appendleft((name, func))
-            else:
-                self.queue.append((name, func))
-            if not self.running:
-                self._start_next_locked()
-        return True
-
-    def _start_next_locked(self):
-        name, func = self.queue.popleft()
-        self.running = True
-        self.name = name
-        self.log = ""
-        self.result = None
-        threading.Thread(target=self._run, args=(name, func), daemon=True).start()
-
-    def _live_log(self, text):
-        with self.lock:
-            self.log += text
-
-    def _run(self, name, func):
-        try:  # fresh job must not inherit a stale cancel request
-            from sync import CANCEL
-            CANCEL.clear()
-        except ImportError:
-            pass
-        runner = self
-        buf = io.StringIO()
-
-        class Tee(io.TextIOBase):
-            def write(self, s):
-                buf.write(s)
-                runner._live_log(s)
-                return len(s)
-
-        old_stdout = sys.stdout
-        sys.stdout = Tee()
-        ok = True
-        result = None
-        try:
-            try:
-                result = func()
-            except SystemExit:
-                ok = False
-            except Exception as e:
-                buf.write(f"job failed: {e}\n")
-                ok = False
-        finally:
-            sys.stdout = old_stdout
-        with self.lock:
-            self.log = buf.getvalue()
-            self.result = result
-            self.last_done = {"name": name, "ok": ok,
-                              "finished_at": time.time()}
-            self.running = False
-            if self.queue:
-                self._start_next_locked()
-
-
-JOBS = JobRunner()
-
-
-class _Args:
-    def __init__(self, days=None, track=None):
-        self.list = False
-        self.track = track
-        self.untrack = None
-        self.full = False
-        self.days = days
-        self.interactive = False
-
-
-def _run_sync(days=None, track=None):
-    from sync import run as sync_run
-    asyncio.run(sync_run(_Args(days=days, track=track)))
-
-
-DIALOGS = {"list": None}  # cached dialog list; survives across jobs
-
-
-def _fetch_dialogs():
-    from sync import fetch_dialogs
-    result = asyncio.run(fetch_dialogs())
-    DIALOGS["list"] = result
-    return result
-
-
-def parse_groups(raw):
-    out = []
-    for part in (raw or "").split(","):
-        part = part.strip()
-        try:
-            out.append(int(part))
-        except ValueError:
-            pass
-    return out
-
-
-app = FastAPI(title="Telegram Query")
 db.init_db()
 
 
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
-
-class AskRequest(BaseModel):
-    question: str
-
-
-class TrackRequest(BaseModel):
-    chat_ids: list[int]
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    # check the Telegram session in the background (cheap, cached)
+    threading.Thread(target=lambda: tg_auth.run(tg_auth.refresh_auth_state()),
+                     daemon=True).start()
+    yield
 
 
-class UntrackRequest(BaseModel):
-    chat_ids: list[int]
+app = FastAPI(title="Telegram Query", version=config.__version__,
+              docs_url=None, redoc_url=None, openapi_url=None,
+              lifespan=lifespan)
 
-
-class StopRequest(BaseModel):
-    clear_queue: bool = False
+for router in (general.router, auth_api.router, archive.router,
+               ai_api.router, groups.router, jobs.router, setup_api.router):
+    app.include_router(router)
 
 
 # ---------------------------------------------------------------------------
-# API
+# Local-first request guard: only loopback / explicitly-configured hosts may
+# talk to the API. Blocks other origins (DNS rebinding, cross-site form POSTs).
 # ---------------------------------------------------------------------------
+
+def _allowed_hosts() -> set[str]:
+    hosts = {"localhost", "127.0.0.1", "::1", "testserver"}
+    if config.settings.host and config.settings.host != "0.0.0.0":
+        hosts.add(config.settings.host.lower())
+    extra = os.environ.get("TG_ALLOWED_HOSTS", "")
+    hosts.update(h.strip().lower() for h in extra.split(",") if h.strip())
+    return hosts
+
+
+def _host_token(raw: str) -> str:
+    """'localhost:8000' -> 'localhost'; '[::1]:8000'/'[::1]' -> '::1'."""
+    if raw.startswith("["):
+        return raw[1:raw.index("]")] if "]" in raw else raw
+    return raw.rsplit(":", 1)[0]
+
+
+@app.middleware("http")
+async def host_guard(request: Request, call_next):
+    raw = (request.headers.get("host") or "").strip().lower()
+    if _host_token(raw) not in _allowed_hosts():
+        log.warning("blocked request with Host %r", raw)
+        return JSONResponse(
+            {"error": "This app only accepts requests addressed to the "
+                      "local machine."},
+            status_code=403)
+    return await call_next(request)
+
 
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(HERE, "static", "index.html"))
+    """Serve the built React app."""
+    if (WEB_DIST / "index.html").exists():
+        return FileResponse(WEB_DIST / "index.html")
+    return JSONResponse(
+        {"error": "Frontend build missing - run: cd web && npm install && npm run build"},
+        status_code=500)
 
 
-@app.get("/api/stats")
-def api_stats():
-    conn = db.get_db()
-    try:
-        s = db.stats(conn)
-        s["ai_configured"] = ai.is_configured()
-        return s
-    finally:
-        conn.close()
+if (WEB_DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"),
+              name="assets")
 
 
-@app.get("/api/groups")
-def api_groups():
-    conn = db.get_db()
-    try:
-        rows = conn.execute("""
-            SELECT c.chat_id, c.title, c.kind, c.username, c.last_synced,
-                   COUNT(m.msg_id) AS message_count, MAX(m.date) AS last_message
-            FROM chats c LEFT JOIN messages m ON m.chat_id = c.chat_id
-            WHERE c.tracked = 1
-            GROUP BY c.chat_id ORDER BY c.title COLLATE NOCASE
-        """).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception):
+    log.exception("unhandled error on %s", request.url.path, exc_info=exc)
+    return JSONResponse({"error": "Internal server error - see the app logs."},
+                        status_code=500)
 
 
-@app.get("/api/messages")
-def api_messages(groups: str = "", sender: str = "", from_: str = "",
-                 to: str = "", media: int = None, cursor: str = "",
-                 limit: int = 50, sort: str = "desc"):
-    conn = db.get_db()
-    try:
-        rows, next_cursor, has_more = db.browse(
-            conn,
-            chat_ids=parse_groups(groups) or None,
-            sender=sender or None,
-            date_from=from_ or None,
-            date_to=to or None,
-            media=media,
-            cursor=cursor or None,
-            limit=min(limit, 200),
-            sort=sort,
-        )
-        return {"messages": rows, "next_cursor": next_cursor, "has_more": has_more}
-    finally:
-        conn.close()
-
-
-@app.get("/api/senders")
-def api_senders(groups: str = ""):
-    conn = db.get_db()
-    try:
-        return db.senders(conn, chat_ids=parse_groups(groups) or None)
-    finally:
-        conn.close()
-
-
-@app.get("/api/search")
-def api_search(q: str = "", groups: str = "", sender: str = "",
-               from_: str = "", to: str = "", limit: int = 200):
-    if not q.strip():
-        return []
-    conn = db.get_db()
-    try:
-        return db.search(
-            conn,
-            [p.strip() for p in q.split("|") if p.strip()],  # | = multiple phrases
-            chat_ids=parse_groups(groups) or None,
-            sender=sender or None,
-            date_from=from_ or None,
-            date_to=to or None,
-            require_all=False,  # any-phrase match; ranking favors multi-hits
-            limit=min(limit, 500),
-        )
-    finally:
-        conn.close()
-
-
-@app.post("/api/ask")
-def api_ask(req: AskRequest):
-    conn = db.get_db()
-    try:
-        result = ai.ask(conn, req.question)
-        sources = result.pop("sources", [])
-        result["sources"] = [
-            {k: m[k] for k in ("chat_title", "date", "sender_name", "text", "has_media")}
-            for m in sources
-        ]
-        return result
-    finally:
-        conn.close()
-
-
-# ---------------------------------------------------------------------------
-# Jobs: sync / dialogs / track / untrack
-# ---------------------------------------------------------------------------
-
-@app.post("/api/sync")
-def api_sync(days: int = None):
-    if not TELEGRAM_CONFIGURED:
-        return JSONResponse({"error": "Telegram credentials not configured"},
-                            status_code=400)
-    with JOBS.lock:
-        queued_behind = ([JOBS.name] if JOBS.running else []) + \
-                        [n for n, _ in JOBS.queue]
-    started = JOBS.start("sync", lambda: _run_sync(days=days))
-    if not started:
-        return {"started": False, "reason": "already_queued"}
-    return {"started": True, "queued_behind": queued_behind}
-
-
-@app.post("/api/job/stop")
-def api_job_stop(req: StopRequest = None):
-    """Ask the running job to stop at its next checkpoint.
-    clear_queue=True also drops every queued (not yet started) job."""
-    dropped = []
-    with JOBS.lock:
-        if req and req.clear_queue:
-            while JOBS.queue:
-                dropped.append(JOBS.queue.popleft()[0])
-    stopping = False
-    if JOBS.running:
-        from sync import CANCEL
-        CANCEL.set()
-        stopping = True
-    return {"stopping": stopping, "cleared": dropped}
-
-
-@app.get("/api/job/status")
-def api_job_status():
-    with JOBS.lock:
-        return {"running": JOBS.running, "name": JOBS.name, "log": JOBS.log,
-                "queued": [n for n, _ in JOBS.queue],
-                "last_done": JOBS.last_done}
-
-
-def _tracked_ids():
-    conn = db.get_db()
-    try:
-        return {r["chat_id"] for r in
-                conn.execute("SELECT chat_id FROM chats WHERE tracked=1").fetchall()}
-    finally:
-        conn.close()
-
-
-@app.post("/api/dialogs")
-def api_dialogs_start():
-    if not TELEGRAM_CONFIGURED:
-        return JSONResponse({"error": "Telegram credentials not configured"},
-                            status_code=400)
-    # front=True: the listing is quick and unblocks the Manage UI
-    started = JOBS.start("dialogs", _fetch_dialogs, front=True)
-    return {"started": started, "reason": None if started else "already_pending"}
-
-
-@app.get("/api/dialogs")
-def api_dialogs_get():
-    if DIALOGS["list"] is not None:
-        tracked = _tracked_ids()
-        return {"ready": True,
-                "dialogs": [{**d, "tracked": d["chat_id"] in tracked}
-                            for d in DIALOGS["list"]]}
-    return {"ready": False}
-
-
-@app.post("/api/groups/track")
-def api_track(req: TrackRequest):
-    if not req.chat_ids:
-        return JSONResponse({"error": "chat_ids required"}, status_code=400)
-    if not TELEGRAM_CONFIGURED:
-        return JSONResponse({"error": "Telegram credentials not configured"},
-                            status_code=400)
-    tracked = _tracked_ids()
-    new_ids = [cid for cid in req.chat_ids if cid not in tracked]
-    if not new_ids:
-        return {"started": False, "reason": "already_tracked"}
-    with JOBS.lock:
-        queued_behind = ([JOBS.name] if JOBS.running else []) + \
-                        [n for n, _ in JOBS.queue]
-    JOBS.start("track", lambda: _run_sync(track=new_ids))
-    return {"started": True, "chat_ids": new_ids, "queued_behind": queued_behind}
-
-
-@app.post("/api/groups/untrack")
-def api_untrack(req: UntrackRequest):
-    if not req.chat_ids:
-        return JSONResponse({"error": "chat_ids required"}, status_code=400)
-    conn = db.get_db()
-    try:
-        for cid in req.chat_ids:
-            conn.execute("UPDATE chats SET tracked=0 WHERE chat_id=?", (cid,))
-        conn.commit()
-    finally:
-        conn.close()
-    return {"ok": True}
-
-
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=HOST, port=PORT)
+    uvicorn.run(app, host=config.settings.host, port=config.settings.port)
