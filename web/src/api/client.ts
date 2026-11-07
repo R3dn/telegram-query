@@ -2,12 +2,16 @@
 import type {
   AppState,
   AskResult,
+  AskScope,
   AuthState,
+  BookmarkRow,
   Dialog,
   FeedPage,
   Group,
   JobStatus,
   Message,
+  SavedSearch,
+  SchedulerState,
   Sender,
 } from "./types";
 
@@ -27,6 +31,28 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 const post = <T>(url: string, body?: unknown): Promise<T> =>
   req<T>(url, { method: "POST", body: JSON.stringify(body ?? {}) });
 
+const patch = <T>(url: string, body?: unknown): Promise<T> =>
+  req<T>(url, { method: "PATCH", body: JSON.stringify(body ?? {}) });
+
+/** Fetch a file endpoint and trigger a browser download of the response. */
+async function download(url: string, init?: RequestInit): Promise<string> {
+  const r = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
+  if (!r.ok) {
+    const data = await r.json().catch(() => null);
+    const msg = (data && (data.error ?? data.detail)) ?? `export failed (${r.status})`;
+    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+  }
+  const blob = await r.blob();
+  const name = (r.headers.get("content-disposition")?.match(/filename="?([^";]+)"?/)?.[1])
+    ?? "telegram-query-export.txt";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+  return name;
+}
+
 export const api = {
   // general
   appState: () => req<AppState>("/api/app/state"),
@@ -45,6 +71,7 @@ export const api = {
   messages: (p: {
     groups: number[]; sender?: string; from?: string; to?: string;
     media?: string; cursor?: string; limit?: number; sort?: string;
+    bookmarked?: boolean;
   }): Promise<FeedPage> => {
     const q = new URLSearchParams();
     if (p.groups.length) q.set("groups", p.groups.join(","));
@@ -53,6 +80,7 @@ export const api = {
     if (p.to) q.set("to", p.to);
     if (p.media) q.set("media", p.media);
     if (p.cursor) q.set("cursor", p.cursor);
+    if (p.bookmarked) q.set("bookmarked", "true");
     q.set("limit", String(p.limit ?? 50));
     q.set("sort", p.sort ?? "desc");
     return req<FeedPage>(`/api/messages?${q}`);
@@ -61,19 +89,64 @@ export const api = {
     req<Message>(`/api/message/${chatId}/${msgId}`),
   search: (p: {
     q: string; groups: number[]; sender?: string; from?: string; to?: string;
-    limit?: number;
+    limit?: number; bookmarked?: boolean;
   }): Promise<Message[]> => {
     const q = new URLSearchParams({ q: p.q });
     if (p.groups.length) q.set("groups", p.groups.join(","));
     if (p.sender) q.set("sender", p.sender);
     if (p.from) q.set("from_", p.from);
     if (p.to) q.set("to", p.to);
+    if (p.bookmarked) q.set("bookmarked", "true");
     q.set("limit", String(p.limit ?? 200));
     return req<Message[]>(`/api/search?${q}`);
   },
 
   // ai
-  ask: (question: string) => post<AskResult>("/api/ask", { question }),
+  ask: (question: string, scope?: AskScope) =>
+    post<AskResult>("/api/ask", { question, scope: scope ?? null }),
+
+  // bookmarks + notes (v0.4)
+  bookmarks: (p?: { q?: string; groups?: number[] }) => {
+    const q = new URLSearchParams();
+    if (p?.q) q.set("q", p.q);
+    if (p?.groups?.length) q.set("groups", p.groups.join(","));
+    return req<BookmarkRow[]>(`/api/bookmarks${q.size ? `?${q}` : ""}`);
+  },
+  bookmarkSet: (chatId: number, msgId: number, note?: string) =>
+    post<{ ok: boolean }>("/api/bookmarks",
+      { chat_id: chatId, msg_id: msgId, note: note ?? "" }),
+  bookmarkDelete: (chatId: number, msgId: number) =>
+    req<{ ok: boolean }>(`/api/bookmarks/${chatId}/${msgId}`, { method: "DELETE" }),
+
+  // saved searches (v0.4)
+  savedList: () => req<SavedSearch[]>("/api/saved-searches"),
+  savedCreate: (s: Omit<SavedSearch, "id" | "created_at" | "last_used_at">) =>
+    post<SavedSearch>("/api/saved-searches", s),
+  savedUpdate: (id: number, s: Omit<SavedSearch, "id" | "created_at" | "last_used_at">) =>
+    patch<SavedSearch>(`/api/saved-searches/${id}`, s),
+  savedDelete: (id: number) =>
+    req<{ ok: boolean }>(`/api/saved-searches/${id}`, { method: "DELETE" }),
+  savedDuplicate: (id: number) =>
+    post<SavedSearch>(`/api/saved-searches/${id}/duplicate`),
+  savedRun: (id: number) => post<SavedSearch>(`/api/saved-searches/${id}/run`),
+
+  // scheduler (v0.4)
+  schedulerState: () => req<SchedulerState>("/api/scheduler"),
+  schedulerConfig: (p: { enabled?: boolean; interval_min?: number }) =>
+    post<SchedulerState>("/api/scheduler", p),
+  reindex: () => post<{ started: boolean }>("/api/reindex"),
+
+  // exports (v0.4)
+  exportBookmarks: (format: "md" | "json") =>
+    download(`/api/export/bookmarks?format=${format}`),
+  exportSaved: () => download("/api/export/saved-searches"),
+  exportAiAnswer: (p: {
+    question: string; answer: string;
+    sources: { chat_id: number; msg_id: number }[];
+    provider_host?: string; model?: string;
+  }) => download("/api/export/ai-answer", {
+    method: "POST", body: JSON.stringify(p),
+  }),
 
   // groups management
   dialogsGet: () => req<{ ready: boolean; dialogs?: Dialog[] }>("/api/dialogs"),

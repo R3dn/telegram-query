@@ -1,6 +1,7 @@
 /** The central message feed: infinite scroll, day separators, highlighting,
  *  empty states, and selection. */
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { api } from "../api/client";
 import { useStore } from "../state/store";
 import type { Message } from "../api/types";
 import { dayKey, dayLabel, fmtTime, highlightRegex } from "../utils/format";
@@ -33,6 +34,34 @@ function MessageCard({ m, multi, re, active, onSelect }: {
   active: boolean;
   onSelect: (m: Message) => void;
 }) {
+  const { toast } = useStore();
+  const [starred, setStarred] = useState(m.bookmarked === 1);
+  const [note, setNote] = useState<string | null>(m.bookmark_note ?? null);
+
+  useEffect(() => {
+    setStarred(m.bookmarked === 1);
+    setNote(m.bookmark_note ?? null);
+  }, [m.bookmarked, m.bookmark_note]);
+
+  const toggleStar = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = !starred;
+    setStarred(next);
+    if (!next) setNote(null);
+    try {
+      if (next) {
+        await api.bookmarkSet(m.chat_id, m.msg_id, note ?? "");
+        toast("Bookmarked ⭐", "good");
+      } else {
+        await api.bookmarkDelete(m.chat_id, m.msg_id);
+        toast("Bookmark removed", "info");
+      }
+    } catch (err) {
+      setStarred(!next);  // revert on failure - never fake success
+      toast((err as Error).message, "err");
+    }
+  };
+
   const badges = (
     <>
       {m.edited === 1 && <span className="badge" title="edited">✎</span>}
@@ -46,6 +75,13 @@ function MessageCard({ m, multi, re, active, onSelect }: {
         <span className="msg-time">{fmtTime(m.date)}</span>
         {multi && <span className="msg-grp" dir="auto">{m.chat_title}</span>}
         {badges}
+        <button
+          className={`star ${starred ? "on" : ""}`}
+          title={starred ? "Remove bookmark" : "Bookmark this message"}
+          onClick={(e) => void toggleStar(e)}
+        >
+          {starred ? "★" : "☆"}
+        </button>
       </div>
       <div className="msg-body" dir="auto">
         <HighlightedText text={m.text || ""} re={re} />

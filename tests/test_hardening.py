@@ -10,7 +10,7 @@ def test_ask_provider_timeout_is_friendly(api_client, monkeypatch):
     import ai as ai_module
     monkeypatch.setattr(config.settings, "ai_api_key", "k")
     monkeypatch.setattr(ai_module, "ask_db",
-                        lambda q: (_ for _ in ()).throw(
+                        lambda q, scope=None: (_ for _ in ()).throw(
                             openai.APITimeoutError(request=None)))
     r = api_client.post("/api/ask", json={"question": "hi"})
     assert r.status_code == 502
@@ -34,7 +34,7 @@ def test_ask_provider_bad_key_is_friendly(api_client, monkeypatch):
         message="401 invalid key", response=FakeResp(), body=None)
     monkeypatch.setattr(config.settings, "ai_api_key", "k")
     monkeypatch.setattr(ai_module, "ask_db",
-                        lambda q: (_ for _ in ()).throw(err))
+                        lambda q, scope=None: (_ for _ in ()).throw(err))
     r = api_client.post("/api/ask", json={"question": "hi"})
     assert r.status_code == 400
     assert "API key" in r.json()["error"]
@@ -57,7 +57,7 @@ def test_ask_provider_unknown_model_is_friendly(api_client, monkeypatch):
         message="404 model not found", response=FakeResp(), body=None)
     monkeypatch.setattr(config.settings, "ai_api_key", "k")
     monkeypatch.setattr(ai_module, "ask_db",
-                        lambda q: (_ for _ in ()).throw(err))
+                        lambda q, scope=None: (_ for _ in ()).throw(err))
     r = api_client.post("/api/ask", json={"question": "hi"})
     assert r.status_code == 400
     assert "model" in r.json()["error"].lower()
@@ -67,7 +67,7 @@ def test_ask_unexpected_error_is_generic_500(api_client, monkeypatch):
     import ai as ai_module
     monkeypatch.setattr(config.settings, "ai_api_key", "k")
     monkeypatch.setattr(ai_module, "ask_db",
-                        lambda q: (_ for _ in ()).throw(RuntimeError("boom")))
+                        lambda q, scope=None: (_ for _ in ()).throw(RuntimeError("boom")))
     r = api_client.post("/api/ask", json={"question": "hi"})
     assert r.status_code == 500
     assert "Internal" not in r.json()["error"] or "logs" in r.json()["error"]

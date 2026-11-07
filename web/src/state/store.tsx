@@ -11,7 +11,9 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "../api/client";
-import type { AppState, Group, JobStatus, Message, Sender } from "../api/types";
+import type {
+  AppState, Group, JobStatus, Message, SavedSearch, Sender,
+} from "../api/types";
 import {
   getSearchHistory,
   pushSearchHistory,
@@ -21,7 +23,7 @@ import {
 } from "../utils/history";
 import { jobLabel } from "../utils/format";
 
-export type FeedMode = "browse" | "search";
+export type FeedMode = "browse" | "search" | "bookmarks";
 export type RightTab = "ai" | "details";
 export type DateChip = "all" | "today" | "7d" | "30d" | "custom";
 
@@ -31,9 +33,12 @@ export interface Filters {
   sender: string;
   media: string; // '' | '0' | '1'
   sort: string; // 'desc' | 'asc'
+  starred: boolean; // only bookmarked messages (v0.4)
 }
 
-const DEFAULT_FILTERS: Filters = { from: "", to: "", sender: "", media: "", sort: "desc" };
+const DEFAULT_FILTERS: Filters = {
+  from: "", to: "", sender: "", media: "", sort: "desc", starred: false,
+};
 
 interface Store {
   // theme
@@ -71,6 +76,11 @@ interface Store {
   setDateChip: (c: DateChip) => void;
   searchHistory: SearchHistoryItem[];
   pushSearch: (q: string) => void;
+
+  // saved searches (v0.4)
+  savedSearches: SavedSearch[];
+  refreshSaved: () => Promise<void>;
+  applySaved: (s: SavedSearch) => void;
 
   // jobs
   jobs: JobStatus | null;
@@ -210,7 +220,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             setHasMore(false);
             return;
           }
-          let rows = await api.search({ q, groups: [...selection], sender: filters.sender, from: filters.from, to: filters.to });
+          let rows = await api.search({
+            q, groups: [...selection], sender: filters.sender,
+            from: filters.from, to: filters.to,
+            bookmarked: filters.starred || undefined,
+          });
           rows = rows.slice().sort((a, b) => (filters.sort === "asc" ? (a.date < b.date ? -1 : 1) : a.date > b.date ? -1 : 1));
           if (seq !== loadSeq.current) return;
           setFeed(rows);
@@ -225,6 +239,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             cursor: reset ? undefined : cursorRef.current ?? undefined,
             limit: 50,
             sort: filters.sort,
+            bookmarked: filters.starred || undefined,
           });
           if (seq !== loadSeq.current) return;
           setFeed((f) => (reset ? page.messages : [...f, ...page.messages]));
@@ -251,6 +266,51 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const pushSearch = useCallback((query: string) => {
     setSearchHistory(pushSearchHistory(query));
   }, []);
+
+  // ---------- saved searches (v0.4) ----------
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
+
+  const refreshSaved = useCallback(async () => {
+    try {
+      setSavedSearches(await api.savedList());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSaved();
+  }, [refreshSaved]);
+
+  const applySaved = useCallback((s: SavedSearch) => {
+    setSelection(new Set(s.chat_ids));
+    setFiltersState((prev) => ({
+      ...prev,
+      sender: s.sender,
+      media: s.media,
+      sort: s.sort,
+      from: s.date_from,
+      to: s.date_to,
+      starred: false,
+    }));
+    setDateChipState(s.date_from || s.date_to ? "custom" : "all");
+    if (s.q.trim()) {
+      setQ(s.q);
+      setModeState("search");
+      setSearchHistory(pushSearchHistory(s.q));
+    } else {
+      setQ("");
+      setModeState("browse");
+    }
+    void (async () => {
+      try {
+        await api.savedRun(s.id);
+        await refreshSaved();
+      } catch {
+        /* non-essential */
+      }
+    })();
+  }, [refreshSaved]);
 
   const runSearch = useCallback((query: string) => {
     const queryTrim = query.trim();
@@ -329,6 +389,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       groups, selection, toggleGroup, clearSelection, refreshGroups, senders,
       mode, setMode, q, runSearch, feed, hasMore, loading, loadFeed,
       filters, setFilters, dateChip, setDateChip, searchHistory, pushSearch,
+      savedSearches, refreshSaved, applySaved,
       jobs, refreshJobs,
       rightTab, setRightTab, selected, select, modal, setModal,
       wizardOpen, setWizardOpen,
@@ -336,7 +397,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [theme, toggleTheme, toasts, toast, appState, refreshAppState, groups,
      selection, toggleGroup, clearSelection, refreshGroups, senders, mode,
      setMode, q, runSearch, feed, hasMore, loading, loadFeed, filters,
-     setFilters, dateChip, setDateChip, searchHistory, pushSearch, jobs,
+     setFilters, dateChip, setDateChip, searchHistory, pushSearch,
+     savedSearches, refreshSaved, applySaved, jobs,
      refreshJobs, rightTab, selected, modal, wizardOpen],
   );
 

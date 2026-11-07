@@ -1,16 +1,21 @@
 """SQLite storage + FTS5 (trigram) search for Telegram messages.
 
 Schema:
-  chats       - tracked Telegram groups/channels + sync state + backfill checkpoints
-  messages    - one row per message, PK (chat_id, msg_id)
-  messages_fts- FTS5 external-content index on messages.text_norm (trigram)
-  schema_meta - migration bookkeeping (schema version)
+  chats         - tracked Telegram groups/channels + sync state + backfill checkpoints
+  messages      - one row per message, PK (chat_id, msg_id)
+  messages_fts  - FTS5 external-content index on messages.text_norm (trigram)
+  app_settings  - key/value app state (scheduler, reindex flags, ...)
+  saved_searches- named search + filter sets (v0.4)
+  bookmarks     - starred messages + private notes, PK (chat_id, msg_id) (v0.4)
+  schema_meta   - migration bookkeeping (schema version)
 
 Search semantics:
   - Each phrase is matched as a substring sequence (trigram) in normalized text.
   - require_all=True  -> phrases are ANDed (classic search box behaviour)
   - require_all=False -> phrases are ORed, rows matching more phrases rank higher
 """
+import json
+import os
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -31,18 +36,81 @@ _CHAR_MAP = str.maketrans({
     "ؤ": "و",                                  # waw-hamza -> waw
     "ة": "ه",                                  # taa marbuta -> ha
 })
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_ELONGATION = re.compile(r"(.)\1{2,}")          # 3+ repeats of one char
+_LATIN_WORD = re.compile(r"[a-z]")
+_DIGIT_RUN = re.compile(r"\d{2,}")               # prices / promo codes
+
+# Arabizi digits used as letters (single digits inside Latin words only).
+_ARABIZI_DIGITS = {"2": "ا", "3": "ع", "5": "خ",
+                   "6": "ط", "7": "ح", "8": "ق", "9": "ص"}
+
+# Gulf-dialect -> common form. Keys/values are stored raw and folded at import
+# time so the map always matches already-normalized text. Replace entirely
+# with env TGQ_DIALECT_MAP='{"from":"to",...}' (JSON).
+_DIALECT_MAP_RAW = {
+    "شلون": "كيف",
+    "وين": "اين",
+    "فين": "اين",
+    "شنو": "ايش",
+    "بكير": "مبكر",
+    "الحين": "الان",
+    "هالحين": "الان",
+    "برضو": "ايضا",
+    "برضه": "ايضا",
+    "اكيد": "مؤكد",
+}
 
 
-def normalize_text(text: str) -> str:
-    """Lowercase, strip Arabic diacritics, unify alef/ya variants, collapse punctuation."""
-    if not text:
-        return ""
+def _fold(text: str) -> str:
+    """Standard (v0.3) normalization pipeline, without the extended extras."""
     t = text.lower()
     t = _DIACRITICS.sub("", t)
     t = t.translate(_CHAR_MAP)
-    # Collapse any non-word char runs (incl. Arabic punctuation) into one space.
     t = re.sub(r"[^\w\u0600-\u06FF]+", " ", t)
     return t.strip()
+
+
+def _load_dialect_map() -> dict[str, str]:
+    raw = _DIALECT_MAP_RAW
+    env = os.environ.get("TGQ_DIALECT_MAP", "").strip()
+    if env:
+        try:
+            parsed = json.loads(env)
+            raw = {str(k): str(v) for k, v in parsed.items()}
+        except (ValueError, AttributeError):
+            pass  # malformed override -> keep defaults
+    # fold both sides so the map matches already-normalized words
+    return {_fold(k): _fold(v) for k, v in raw.items() if k and v}
+
+
+_DIALECT_MAP = _load_dialect_map()
+
+
+def normalize_text(text: str) -> str:
+    """Normalize for the FTS index and queries.
+
+    Level "standard" (env NORMALIZATION) reproduces v0.3 exactly. Level
+    "extended" (default) adds: Arabic-Indic digit folding, elongation
+    collapse, Arabizi single-digit folding inside Latin words, and the Gulf
+    dialect map. Deterministic; the original text is never modified - only
+    this normalized copy is used for search.
+    """
+    if not text:
+        return ""
+    t = _fold(text)
+    if config.settings.normalization_level != "extended":
+        return t
+    words = t.translate(_ARABIC_DIGITS).split()
+    out = []
+    for w in words:
+        if len(w) > 2 and not w.isdigit():
+            w = _ELONGATION.sub(r"\1", w)      # هااااي -> هاي (never digits)
+        if _LATIN_WORD.search(w) and not _DIGIT_RUN.search(w):
+            w = "".join(_ARABIZI_DIGITS.get(c, c) for c in w)
+        w = _DIALECT_MAP.get(w, w)
+        out.append(w)
+    return " ".join(out)
 
 
 def fts_quote(phrase: str) -> str:
@@ -88,10 +156,41 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     content_rowid='rowid',
     tokenize='trigram'
 );
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS saved_searches (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    q            TEXT NOT NULL DEFAULT '',
+    chat_ids     TEXT NOT NULL DEFAULT '[]',  -- JSON array of group ids
+    sender       TEXT NOT NULL DEFAULT '',
+    media        TEXT NOT NULL DEFAULT '',    -- '' | '0' | '1'
+    date_from    TEXT NOT NULL DEFAULT '',
+    date_to      TEXT NOT NULL DEFAULT '',
+    sort         TEXT NOT NULL DEFAULT 'desc',
+    created_at   TEXT NOT NULL,
+    last_used_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS bookmarks (
+    chat_id    INTEGER NOT NULL,
+    msg_id     INTEGER NOT NULL,
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (chat_id, msg_id),
+    FOREIGN KEY (chat_id, msg_id) REFERENCES messages(chat_id, msg_id)
+        ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_updated ON bookmarks(updated_at);
 """
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _migrate(conn):
@@ -112,6 +211,17 @@ def _migrate(conn):
             conn.execute("ALTER TABLE chats ADD COLUMN backfill_floor "
                          "INTEGER NOT NULL DEFAULT 0")
         current = 2
+    if current < 3:
+        # v3: app_settings / saved_searches / bookmarks (created by SCHEMA
+        # for fresh databases; this branch bumps existing ones). Extended
+        # normalization changed text_norm semantics -> flag a one-time
+        # background reindex for archives that already have messages.
+        n = conn.execute("SELECT COUNT(*) c FROM messages").fetchone()["c"]
+        if n and config.settings.normalization_level == "extended":
+            conn.execute(
+                "INSERT OR REPLACE INTO app_settings (key, value) "
+                "VALUES ('needs_reindex', '1')")
+        current = 3
     conn.execute(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)",
         (str(current),))
@@ -124,6 +234,7 @@ def get_db(path: str = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=20000")
+    conn.execute("PRAGMA foreign_keys=ON")
     if str(p) not in _INITIALIZED:
         conn.executescript(SCHEMA)
         _migrate(conn)
@@ -138,6 +249,47 @@ _INITIALIZED = set()
 def init_db(path: str = None):
     conn = get_db(path)
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# App settings (scheduler state, reindex flags, future feature settings)
+# ---------------------------------------------------------------------------
+
+def get_setting(conn, key: str, default: str | None = None) -> str | None:
+    row = conn.execute(
+        "SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(conn, key: str, value: str):
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, str(value)))
+
+
+# ---------------------------------------------------------------------------
+# Telegram deep links
+# ---------------------------------------------------------------------------
+
+def message_link(chat_id: int | None, username: str | None,
+                 msg_id: int) -> str | None:
+    """External link to the original message, when Telegram provides one.
+
+    - Public groups/channels: https://t.me/<username>/<msg_id>
+    - Supergroups/channels (no username): https://t.me/c/<id>/<msg_id>
+      (only works for members - that is Telegram's rule, not ours)
+    - Basic groups / DMs: no per-message links exist.
+    Never fabricates a URL: returns None when no usable link exists.
+    """
+    if username and msg_id is not None:
+        return f"https://t.me/{username}/{msg_id}"
+    if chat_id is not None and msg_id is not None and \
+            chat_id <= -1000000000000:  # Telethon supergroup/channel mark
+        c_id = -(chat_id + 1000000000000)
+        if c_id > 0:
+            return f"https://t.me/c/{c_id}/{msg_id}"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -227,9 +379,13 @@ def reindex_fts(conn):
 def delete_chats_messages(conn, chat_ids):
     """Permanently delete the archived messages of the given chats and
     reset their sync state (so a re-track re-backfills from scratch).
+    Bookmarks of those messages are removed as well (the FK cascades, this
+    is belt-and-suspenders for connections without the pragma).
     Rebuilds the FTS index once at the end. Destructive - used only by the
     explicit 'untrack & delete' action."""
     for cid in chat_ids:
+        conn.execute(
+            "DELETE FROM bookmarks WHERE chat_id=?", (cid,))
         conn.execute("DELETE FROM messages WHERE chat_id=?", (cid,))
         conn.execute(
             "UPDATE chats SET last_msg_id=0, backfill_floor=0 WHERE chat_id=?",
@@ -252,11 +408,13 @@ def _expand_date(d, end=False):
 
 
 def search(conn, phrases, chat_ids=None, sender=None,
-          date_from=None, date_to=None, require_all=True, limit=200):
+          date_from=None, date_to=None, require_all=True, limit=200,
+          bookmarked=None):
     """Search normalized text. Returns list of dict rows, newest first.
 
     phrases      - list of raw strings (will be normalized)
     require_all  - True: AND all phrases. False: OR, more matches = higher rank.
+    bookmarked   - True: only bookmarked messages. False/None: all messages.
     """
     # Trigram tokenizer requires >= 3 chars per phrase; drop shorter ones.
     norm = [normalize_text(p) for p in phrases
@@ -272,10 +430,14 @@ def search(conn, phrases, chat_ids=None, sender=None,
     query = """
         SELECT m.chat_id, m.msg_id, m.date, m.sender_id, m.sender_name,
                m.text, m.has_media, m.edited, c.title AS chat_title,
+               c.username AS chat_username,
+               (b.chat_id IS NOT NULL) AS bookmarked, b.note AS bookmark_note,
                bm25(messages_fts) AS rank
         FROM messages_fts
         JOIN messages m ON m.rowid = messages_fts.rowid
         JOIN chats c   ON c.chat_id = m.chat_id
+        LEFT JOIN bookmarks b
+               ON b.chat_id = m.chat_id AND b.msg_id = m.msg_id
         WHERE messages_fts MATCH ? AND c.tracked = 1
     """
     params = [match_expr]
@@ -293,6 +455,8 @@ def search(conn, phrases, chat_ids=None, sender=None,
     if date_to:
         query += " AND m.date <= ?"
         params.append(_expand_date(date_to, end=True))
+    if bookmarked:
+        query += " AND b.chat_id IS NOT NULL"
 
     query += " ORDER BY rank LIMIT ?"
     params.append(limit)
@@ -302,19 +466,24 @@ def search(conn, phrases, chat_ids=None, sender=None,
 
 
 def browse(conn, chat_ids=None, sender=None, date_from=None, date_to=None,
-           media=None, cursor=None, limit=50, sort="desc"):
+           media=None, cursor=None, limit=50, sort="desc", bookmarked=None):
     """Keyset-paginated chronological feed across tracked chats.
 
     cursor - "date|chat_id|msg_id" of the last row of the previous page
               (returned as next_cursor). Ignored if malformed.
     sort   - "desc" (newest first) or "asc" (oldest first).
+    bookmarked - True: only bookmarked messages. False/None: all messages.
     Returns (rows, next_cursor, has_more).
     """
     desc = sort != "asc"
     query = """
         SELECT m.chat_id, m.msg_id, m.date, m.sender_id, m.sender_name,
-               m.text, m.has_media, m.edited, c.title AS chat_title
+               m.text, m.has_media, m.edited, c.title AS chat_title,
+               c.username AS chat_username,
+               (b.chat_id IS NOT NULL) AS bookmarked, b.note AS bookmark_note
         FROM messages m JOIN chats c ON c.chat_id = m.chat_id
+        LEFT JOIN bookmarks b
+               ON b.chat_id = m.chat_id AND b.msg_id = m.msg_id
         WHERE c.tracked = 1
     """
     params = []
@@ -334,6 +503,8 @@ def browse(conn, chat_ids=None, sender=None, date_from=None, date_to=None,
     if media is not None:
         query += " AND m.has_media = ?"
         params.append(1 if media else 0)
+    if bookmarked:
+        query += " AND b.chat_id IS NOT NULL"
     if cursor:
         try:
             c_date, c_chat, c_msg = cursor.split("|", 2)

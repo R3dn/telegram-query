@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { SearchBar } from "./components/SearchBar";
 import { FilterBar } from "./components/FilterBar";
 import { Feed } from "./components/Feed";
+import { BookmarksView } from "./components/BookmarksView";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { AiPanel } from "./components/AiPanel";
 import { JobCenter } from "./components/JobCenter";
@@ -24,7 +25,7 @@ function shouldShowWizard(
 
 export default function App() {
   const store = useStore();
-  const { appState, wizardOpen, setWizardOpen, modal, setModal } = store;
+  const { appState, wizardOpen, setWizardOpen, modal, setModal, mode } = store;
 
   const [wizardSeen, setWizardSeen] = useState(
     () => localStorage.getItem("tgq-wizard-seen") === "1",
@@ -58,9 +59,15 @@ export default function App() {
       <div className="app">
         <Sidebar />
         <main className="center">
-          <SearchBar />
-          <FilterBar />
-          <Feed />
+          {mode === "bookmarks" ? (
+            <BookmarksView />
+          ) : (
+            <>
+              <SearchBar />
+              <FilterBar />
+              <Feed />
+            </>
+          )}
         </main>
         <RightPanel />
       </div>
@@ -166,6 +173,10 @@ function MobileNav() {
         <button onClick={() => { setMode("browse"); document.body.classList.remove("tgq-side-open", "tgq-right-open"); }}
           className={mode === "browse" ? "on" : ""}>
           <span className="bic">🔍</span> Browse
+        </button>
+        <button onClick={() => { setMode("bookmarks"); document.body.classList.remove("tgq-side-open", "tgq-right-open"); }}
+          className={mode === "bookmarks" ? "on" : ""}>
+          <span className="bic">⭐</span> Saved
         </button>
         <button onClick={() => { open("tgq-side-open"); }}>
           <span className="bic">👥</span> Groups

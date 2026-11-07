@@ -1,12 +1,20 @@
-/** Filter bar: mode segment, date presets, sender/media/sort, active chips. */
+/** Filter bar: mode segment, date presets, sender/media/sort/star filters,
+ *  active chips, and saving the current search (v0.4). */
+import { useState } from "react";
+import { api } from "../api/client";
 import { useStore } from "../state/store";
 import type { Sender } from "../api/types";
+import { Modal } from "./Modal";
 
 export function FilterBar() {
   const {
     mode, setMode, filters, setFilters, dateChip, setDateChip,
     senders, selection, clearSelection, groups, hasMore,
+    q, refreshSaved, toast,
   } = useStore();
+
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
 
   const activeChips: { label: string; clear: () => void }[] = [];
   if (filters.from) activeChips.push({ label: `from ${filters.from}`, clear: () => setDateChip("all") });
@@ -15,6 +23,7 @@ export function FilterBar() {
   if (filters.media === "1") activeChips.push({ label: "with images", clear: () => setFilters({ media: "" }) });
   if (filters.media === "0") activeChips.push({ label: "text only", clear: () => setFilters({ media: "" }) });
   if (filters.sort === "asc") activeChips.push({ label: "oldest first", clear: () => setFilters({ sort: "desc" }) });
+  if (filters.starred) activeChips.push({ label: "⭐ starred", clear: () => setFilters({ starred: false }) });
   if (selection.size > 0)
     activeChips.push({
       label: `${selection.size} group${selection.size > 1 ? "s" : ""}`,
@@ -24,6 +33,32 @@ export function FilterBar() {
   const scope = selection.size === 0
     ? "all groups"
     : groups.filter((g) => selection.has(g.chat_id)).map((g) => g.title).join(", ");
+
+  const savable = (mode === "search" && !!q.trim()) ||
+    !!(filters.from || filters.to || filters.sender || filters.media || selection.size);
+
+  const saveCurrent = async () => {
+    const name = saveName.trim();
+    if (!name) return;
+    try {
+      await api.savedCreate({
+        name,
+        q: mode === "search" ? q : "",
+        chat_ids: [...selection],
+        sender: filters.sender,
+        media: filters.media,
+        date_from: filters.from,
+        date_to: filters.to,
+        sort: filters.sort,
+      });
+      toast(`Saved “${name}”`, "good");
+      setSaveOpen(false);
+      setSaveName("");
+      await refreshSaved();
+    } catch (e) {
+      toast((e as Error).message, "err");
+    }
+  };
 
   return (
     <div className="filterbar">
@@ -71,6 +106,23 @@ export function FilterBar() {
           <option value="desc">Newest first</option>
           <option value="asc">Oldest first</option>
         </select>
+
+        <button
+          className={`chip ${filters.starred ? "on" : ""}`}
+          title="Show only bookmarked messages"
+          onClick={() => setFilters({ starred: !filters.starred })}
+        >
+          ⭐ Starred
+        </button>
+
+        <button
+          className="chip"
+          title="Save this search + filters under a name"
+          disabled={!savable}
+          onClick={() => setSaveOpen(true)}
+        >
+          💾 Save search
+        </button>
       </div>
 
       <div className="fb-meta">
@@ -84,6 +136,42 @@ export function FilterBar() {
         </span>
         {mode === "browse" && hasMore && <span className="fb-more">more on scroll</span>}
       </div>
+
+      {saveOpen && (
+        <Modal title="Save search" onClose={() => setSaveOpen(false)}
+          footer={
+            <>
+              <button className="btn ghost sm" onClick={() => setSaveOpen(false)}>Cancel</button>
+              <button className="btn primary sm" disabled={!saveName.trim()} onClick={() => void saveCurrent()}>
+                Save
+              </button>
+            </>
+          }>
+          <p className="mm-note dim">
+            Saves the query, selected groups, and filters - not the result rows.
+            Run it any time to re-execute against the live archive.
+          </p>
+          <input
+            className="input"
+            autoFocus
+            placeholder="Name, e.g. أروع العروض / best deals"
+            value={saveName}
+            dir="auto"
+            maxLength={100}
+            onChange={(e) => setSaveName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && saveName.trim()) void saveCurrent();
+            }}
+          />
+          <div className="save-summary">
+            {(mode === "search" && q) ? <span className="chip on">“{q.slice(0, 40)}”</span> : null}
+            {selection.size > 0 && <span className="chip on">{selection.size} group(s)</span>}
+            {(filters.from || filters.to) && <span className="chip on">{filters.from || "…"} → {filters.to || "…"}</span>}
+            {filters.sender && <span className="chip on">sender</span>}
+            {filters.media && <span className="chip on">{filters.media === "1" ? "images" : "text"}</span>}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

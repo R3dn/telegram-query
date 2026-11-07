@@ -5,7 +5,7 @@ must not be used concurrently); extra jobs queue up in order. Anything a
 job prints to stdout is captured and streamed to the UI via
 ``GET /api/job/status``.
 
-Job names: sync | track | dialogs | auth
+Job names: sync | track | dialogs | auth | reindex
 """
 from __future__ import annotations
 
@@ -17,7 +17,12 @@ import threading
 import time
 
 __all__ = ["JOBS", "JobRunner", "run_sync_job", "fetch_dialogs_job",
-           "DIALOGS_CACHE"]
+           "run_reindex_job", "POST_SYNC_HOOKS", "DIALOGS_CACHE"]
+
+# Callables run after every SUCCESSFUL sync job (no args). Registered by
+# features that need incremental work on new messages (v0.6 watchlists,
+# v0.5 deals). Exceptions are logged, never fail the sync.
+POST_SYNC_HOOKS = []
 
 
 class JobRunner:
@@ -106,6 +111,56 @@ def run_sync_job(days=None, track=None):
     from sync import run as sync_run
     asyncio.run(sync_run(SyncArgs(days=days, track=track,
                                   login_interactive=False)))
+    for hook in POST_SYNC_HOOKS:
+        try:
+            hook()
+        except Exception as e:  # noqa: BLE001 - hooks never fail the sync
+            print(f"post-sync hook {getattr(hook, '__name__', hook)} failed: {e}")
+
+
+def run_reindex_job(path=None):
+    """One-time reindex: rewrite text_norm for every message with the CURRENT
+    normalization rules, rebuild the FTS index, clear the needs_reindex flag.
+
+    Batched and cancellable (checked between batches; the flag stays set so
+    the next app start retries it). Safe to re-run - always idempotent.
+    ``path`` targets a specific database (tests); default = the app DB.
+    """
+    import config
+    import db
+    from sync import CANCEL
+
+    conn = db.get_db(path)
+    try:
+        level = config.settings.normalization_level
+        total = conn.execute("SELECT COUNT(*) c FROM messages").fetchone()["c"]
+        print(f"Reindexing {total} messages (normalization: {level}) ...")
+        done, last_rowid, batch = 0, 0, 5000
+        while True:
+            if CANCEL.is_set():
+                print("Reindex paused - it will resume on the next app start "
+                      "(or from Settings).")
+                return
+            rows = conn.execute(
+                "SELECT rowid, text FROM messages WHERE rowid > ? "
+                "ORDER BY rowid LIMIT ?",
+                (last_rowid, batch)).fetchall()
+            if not rows:
+                break
+            for r in rows:
+                conn.execute("UPDATE messages SET text_norm=? WHERE rowid=?",
+                             (db.normalize_text(r["text"] or ""), r["rowid"]))
+            last_rowid = rows[-1]["rowid"]
+            conn.commit()
+            done += len(rows)
+            print(f"  ... {done}/{total}")
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+        db.set_setting(conn, "needs_reindex", "0")
+        db.set_setting(conn, "norm_level", level)
+        conn.commit()
+        print("Reindex complete - search is fully consistent again.")
+    finally:
+        conn.close()
 
 
 def fetch_dialogs_job():

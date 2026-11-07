@@ -24,7 +24,7 @@ load_dotenv(APP_ROOT / ".env")
 
 ENV_FILE = APP_ROOT / ".env"   # written by the setup wizard; tests redirect this
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 def _env(*names: str, default: str = "") -> str:
@@ -85,6 +85,12 @@ class Settings:
     ai_max_sources: int
     groups_hint: str
 
+    # search normalization: "standard" (v0.3 rules) or "extended"
+    # (Arabic-Indic digits, elongation collapse, Arabizi folding, Gulf
+    # dialect word map). Changing the level requires a one-time reindex of
+    # existing archives - the app schedules that automatically.
+    normalization_level: str
+
     @property
     def telegram_configured(self) -> bool:
         return bool(self.tg_api_id and self.tg_api_hash)
@@ -134,6 +140,7 @@ def load_settings() -> Settings:
         ai_temperature=float(_env("AI_TEMPERATURE", default="0.2")),
         ai_max_sources=int(_env("AI_MAX_SOURCES", default="80")),
         groups_hint=_env("TGQ_GROUPS_HINT"),
+        normalization_level=_env("NORMALIZATION", default="extended").strip().lower(),
     )
 
 

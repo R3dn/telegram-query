@@ -186,14 +186,26 @@ def _dedupe(rows):
     return out
 
 
-def ask(conn, question, max_results=None):
-    """Full pipeline. Returns dict(answer, sources, attempts, keywords_tried, fallback)."""
+def ask(conn, question, max_results=None, scope=None):
+    """Full pipeline. Returns dict(answer, sources, attempts, keywords_tried, fallback).
+
+    scope (v0.4 AI scope chips) restricts retrieval explicitly:
+      {"chat_ids": [..], "date_from": "YYYY-MM-DD", "date_to": "YYYY-MM-DD"}
+    Explicit scope overrides the LLM's own chat/date guesses; keyword
+    extraction still runs (retrieval needs it).
+    """
     if max_results is None:
         max_results = config.settings.ai_max_sources
     if not is_configured():
         return {"answer": None,
                 "error": "AI not configured - set AI_API_KEY in .env",
                 "sources": [], "attempts": 0, "keywords_tried": []}
+
+    scope = scope or {}
+    scope_ids = [c for c in (scope.get("chat_ids") or [])
+                 if isinstance(c, int)] or None   # [] -> all groups
+    s_from = scope.get("date_from") or None
+    s_to = scope.get("date_to") or None
 
     client = get_client()
     today = datetime.now(timezone.utc).date()
@@ -228,9 +240,16 @@ def ask(conn, question, max_results=None):
         tried_keyword_sets.append(kws)
 
         date_from, date_to = _resolve_dates(spec, today)
-        chat_ids = _resolve_chat_ids(conn, spec.get("chat_titles"))
-        if chat_ids == []:
-            chat_ids = None
+        if scope_ids is not None:
+            chat_ids = scope_ids                    # explicit scope wins
+        else:
+            chat_ids = _resolve_chat_ids(conn, spec.get("chat_titles"))
+            if chat_ids == []:
+                chat_ids = None
+        if s_from:
+            date_from = s_from
+        if s_to:
+            date_to = s_to
 
         rows = _search_diverse(
             conn, kws, chat_ids=chat_ids,
@@ -253,7 +272,7 @@ def ask(conn, question, max_results=None):
     if not rows:
         # keyword search came up empty - let the model try the recent feed
         # (covers "what's happening / what did I miss" style questions too)
-        recent = db.recent(conn, limit=120)
+        recent = db.recent(conn, limit=120, chat_ids=scope_ids)
         if not recent:
             return {"answer": ("I couldn't find any messages matching that. "
                                "Try different wording, or sync more groups."),
@@ -276,13 +295,15 @@ def ask(conn, question, max_results=None):
         user_msg = f"Today: {today}\n\nQuestion: {question}\n\nMessages:\n{context}"
     answer = _chat(client, SYSTEM_ANSWER, user_msg)
     return {"answer": answer, "sources": context_rows, "attempts": attempts,
-            "keywords_tried": tried_keyword_sets, "fallback": fallback}
+            "keywords_tried": tried_keyword_sets, "fallback": fallback,
+            "scope": {"chat_ids": scope_ids or [], "date_from": s_from,
+                      "date_to": s_to}}
 
 
-def ask_db(question):
+def ask_db(question, scope=None):
     """Convenience entry point: open a connection, run the pipeline, close."""
     conn = db.get_db()
     try:
-        return ask(conn, question)
+        return ask(conn, question, scope=scope)
     finally:
         conn.close()

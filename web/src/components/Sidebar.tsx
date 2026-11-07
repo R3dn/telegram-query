@@ -1,21 +1,38 @@
-/** Left sidebar: identity, navigation, group selection, sync status. */
-import { useMemo, useState } from "react";
+/** Left sidebar: identity, navigation, group selection, saved searches,
+ *  sync status + auto-sync schedule (v0.4). */
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
-import { fmtDate, jobLabel, nfmt } from "../utils/format";
+import type { SchedulerState } from "../api/types";
+import { fmtDate, intervalLabel, jobLabel, nfmt } from "../utils/format";
 
 export function Sidebar() {
   const store = useStore();
   const {
     groups, selection, toggleGroup, clearSelection,
     jobs, appState, setModal, setWizardOpen, setRightTab, setMode,
+    savedSearches, mode,
   } = store;
   const [filter, setFilter] = useState("");
+  const [sched, setSched] = useState<SchedulerState | null>(null);
 
   const shown = useMemo(
     () => groups.filter((g) => !filter || g.title.toLowerCase().includes(filter.toLowerCase())),
     [groups, filter],
   );
+
+  useEffect(() => {
+    let dead = false;
+    const load = async () => {
+      try {
+        const s = await api.schedulerState();
+        if (!dead) setSched(s);
+      } catch { /* ignore */ }
+    };
+    void load();
+    const t = window.setInterval(load, 60_000);
+    return () => { dead = true; clearInterval(t); };
+  }, [jobs?.last_done]);
 
   const running = jobs?.running;
   const queued = jobs?.queued?.length ?? 0;
@@ -53,11 +70,14 @@ export function Sidebar() {
       </div>
 
       <nav className="side-nav">
-        <button className={`nav-item ${store.mode === "browse" ? "on" : ""}`} onClick={() => setMode("browse")}>
+        <button className={`nav-item ${mode === "browse" || mode === "search" ? "on" : ""}`} onClick={() => setMode("browse")}>
           <span className="nav-ic">🔍</span> Browse &amp; search
         </button>
         <button className="nav-item" onClick={askAi}>
           <span className="nav-ic">✦</span> Ask AI
+        </button>
+        <button className={`nav-item ${mode === "bookmarks" ? "on" : ""}`} onClick={() => setMode("bookmarks")}>
+          <span className="nav-ic">⭐</span> Bookmarks
         </button>
         <button className="nav-item" onClick={() => setModal("jobs")}>
           <span className="nav-ic">⇄</span> Jobs
@@ -112,6 +132,19 @@ export function Sidebar() {
         </button>
       </div>
 
+      {savedSearches.length > 0 && (
+        <div className="side-section saved-section">
+          <div className="side-head">
+            <span className="label">Saved searches</span>
+          </div>
+          <div className="saved-list">
+            {savedSearches.map((s) => (
+              <SavedRow key={s.id} id={s.id} />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="side-bottom">
         <div className="sync-card">
           <div className="sync-row">
@@ -124,6 +157,21 @@ export function Sidebar() {
             )}
             {queued > 0 && <span className="badge warn">{queued} queued</span>}
           </div>
+          {sched?.enabled && sched.next_due && !running && (
+            <div className="sync-row dim" title="Configure in Settings">
+              auto-sync {intervalLabel(sched.interval_min)} · next{" "}
+              {new Date(sched.next_due).toLocaleTimeString(undefined, {
+                hour: "2-digit", minute: "2-digit",
+              })}
+            </div>
+          )}
+          {sched?.last_success && (
+            <div className="sync-row dim">
+              last ok {new Date(sched.last_success).toLocaleString(undefined, {
+                month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+              })}
+            </div>
+          )}
           {pendingBackfills > 0 && (
             <div className="sync-row dim">{pendingBackfills} backfill{pendingBackfills > 1 ? "s" : ""} can resume</div>
           )}
@@ -139,5 +187,95 @@ export function Sidebar() {
         </div>
       </div>
     </aside>
+  );
+}
+
+/** One saved-search row: run by clicking, rename/duplicate/delete inline. */
+function SavedRow({ id }: { id: number }) {
+  const { savedSearches, applySaved, refreshSaved, toast } = useStore();
+  const s = savedSearches.find((x) => x.id === id);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(s?.name ?? "");
+  const [confirming, setConfirming] = useState(false);
+
+  if (!s) return null;
+
+  const save = async () => {
+    const n = name.trim();
+    if (!n) return;
+    try {
+      await api.savedUpdate(s.id, {
+        name: n, q: s.q, chat_ids: s.chat_ids, sender: s.sender,
+        media: s.media, date_from: s.date_from, date_to: s.date_to, sort: s.sort,
+      });
+      setEditing(false);
+      await refreshSaved();
+    } catch (e) {
+      toast((e as Error).message, "err");
+    }
+  };
+
+  const duplicate = async () => {
+    try {
+      await api.savedDuplicate(s.id);
+      await refreshSaved();
+    } catch (e) {
+      toast((e as Error).message, "err");
+    }
+  };
+
+  const remove = async () => {
+    try {
+      await api.savedDelete(s.id);
+      setConfirming(false);
+      await refreshSaved();
+    } catch (e) {
+      toast((e as Error).message, "err");
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="saved-row editing">
+        <input
+          className="input"
+          value={name}
+          dir="auto"
+          autoFocus
+          maxLength={100}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+            if (e.key === "Escape") setEditing(false);
+          }}
+        />
+        <button className="btn primary sm" onClick={() => void save()}>✓</button>
+        <button className="btn ghost sm" onClick={() => { setEditing(false); setName(s.name); }}>✕</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="saved-row">
+      <button className="saved-main" onClick={() => applySaved(s)} title={s.q || "browse with these filters"}>
+        <span className="g-title" dir="auto">{s.name}</span>
+        <span className="g-meta" dir="auto">{s.q || "filters only"}</span>
+      </button>
+      <button className="saved-act" title="Rename" onClick={() => { setName(s.name); setEditing(true); }}>✎</button>
+      <button className="saved-act" title="Duplicate" onClick={() => void duplicate()}>⧉</button>
+      <button
+        className={`saved-act ${confirming ? "danger" : ""}`}
+        title={confirming ? "Click again to delete" : "Delete"}
+        onClick={() => {
+          if (confirming) void remove();
+          else {
+            setConfirming(true);
+            setTimeout(() => setConfirming(false), 3000);
+          }
+        }}
+      >
+        {confirming ? "؟" : "✕"}
+      </button>
+    </div>
   );
 }

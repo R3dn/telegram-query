@@ -86,3 +86,17 @@ export function setTheme(theme: "dark" | "light"): void {
   localStorage.setItem(THEME_KEY, theme);
   document.documentElement.classList.toggle("light", theme === "light");
 }
+
+// ---------- AI scope (v0.4) ----------
+
+/** Persisted AI-scope date preset ("all" | "7d" | "30d"), per user choice. */
+const AI_SCOPE_KEY = "tgq-ai-scope-days";
+
+export function getAiScopeDays(): "all" | "7d" | "30d" {
+  const v = localStorage.getItem(AI_SCOPE_KEY);
+  return v === "7d" || v === "30d" ? v : "all";
+}
+
+export function setAiScopeDays(days: "all" | "7d" | "30d"): void {
+  localStorage.setItem(AI_SCOPE_KEY, days);
+}

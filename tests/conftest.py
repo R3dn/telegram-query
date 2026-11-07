@@ -41,6 +41,8 @@ def api_client():
     try:
         c.execute("DELETE FROM messages")
         c.execute("DELETE FROM chats")
+        c.execute("DELETE FROM bookmarks")
+        c.execute("DELETE FROM saved_searches")
         # NOTE: DELETE FROM an external-content FTS table is a no-op -
         # rebuild the index instead, or stale entries resurface once the
         # content table reuses rowids (cross-test contamination).

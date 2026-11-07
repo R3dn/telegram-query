@@ -22,9 +22,16 @@ from fastapi.staticfiles import StaticFiles
 import auth as tg_auth
 import config
 import db
+import jobs
+import scheduler
 from api import ai as ai_api
-from api import archive, general, groups, jobs
+from api import archive, general, groups
 from api import auth as auth_api
+from api import bookmarks as bookmarks_api
+from api import exports as exports_api
+from api import jobs as jobs_api
+from api import saved as saved_api
+from api import scheduler as scheduler_api
 from api import setup as setup_api
 
 logging.basicConfig(
@@ -37,11 +44,30 @@ WEB_DIST = config.APP_ROOT / "web" / "dist"
 db.init_db()
 
 
+def _start_reindex_if_needed():
+    """v0.4 upgrade: re-normalize existing archives once, as a visible job.
+    Idempotent - the job itself clears the flag."""
+    try:
+        conn = db.get_db()
+        try:
+            if db.get_setting(conn, "needs_reindex") == "1":
+                jobs.JOBS.start("reindex", jobs.run_reindex_job, front=True)
+                log.info("normalization changed - reindex job queued")
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("could not queue the reindex job")
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     # check the Telegram session in the background (cheap, cached)
     threading.Thread(target=lambda: tg_auth.run(tg_auth.refresh_auth_state()),
                      daemon=True).start()
+    # auto-sync scheduler (DB-persisted state; thread re-reads it per tick)
+    threading.Thread(target=scheduler.run_loop, daemon=True,
+                     name="tgq-scheduler").start()
+    _start_reindex_if_needed()
     yield
 
 
@@ -50,7 +76,9 @@ app = FastAPI(title="Telegram Query", version=config.__version__,
               lifespan=lifespan)
 
 for router in (general.router, auth_api.router, archive.router,
-               ai_api.router, groups.router, jobs.router, setup_api.router):
+               ai_api.router, groups.router, jobs_api.router, setup_api.router,
+               scheduler_api.router, saved_api.router, bookmarks_api.router,
+               exports_api.router):
     app.include_router(router)
 
 

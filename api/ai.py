@@ -22,8 +22,16 @@ log = logging.getLogger("tgq")
 MAX_QUESTION_CHARS = 2000
 
 
+class AskScope(BaseModel):
+    """Explicit retrieval scope (AI scope chips, v0.4)."""
+    chat_ids: list[int] = Field(default_factory=list)
+    date_from: str | None = Field(default=None, max_length=10)
+    date_to: str | None = Field(default=None, max_length=10)
+
+
 class AskRequest(BaseModel):
     question: str = Field(max_length=MAX_QUESTION_CHARS)
+    scope: AskScope | None = None
 
 
 def _provider_error(exc: Exception):
@@ -72,7 +80,8 @@ def ask(req: AskRequest):
                       "(any OpenAI-compatible endpoint works)."},
             status_code=400)
     try:
-        result = ai.ask_db(question)
+        result = ai.ask_db(question, scope=req.scope.model_dump()
+                           if req.scope else None)
     except Exception as exc:  # noqa: BLE001 - mapped to readable errors below
         mapped = _provider_error(exc)
         if mapped is not None:
@@ -89,4 +98,5 @@ def ask(req: AskRequest):
         for m in sources
     ]
     result["provider_host"] = config.settings.ai_provider_host
+    result["provider_model"] = config.settings.ai_model
     return result

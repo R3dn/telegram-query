@@ -1,11 +1,12 @@
 /** Right panel "Ask AI" tab: conversational history, grounded answers with
- *  clickable citations, provider disclosure, and setup/empty states. */
-import { useEffect, useRef, useState } from "react";
+ *  clickable citations, visible retrieval scope (v0.4 chips), answer export,
+ *  provider disclosure, and setup/empty states. */
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
 import { mdToHtml } from "../utils/markdown";
 import {
-  clearChat, getChat, pushChat, type ChatTurn,
+  clearChat, getAiScopeDays, getChat, pushChat, setAiScopeDays, type ChatTurn,
 } from "../utils/history";
 import { fmtDate } from "../utils/format";
 import { EmptyState } from "./EmptyState";
@@ -18,15 +19,24 @@ const EXAMPLES = [
 ];
 
 export function AiPanel() {
-  const { appState, select, setRightTab, toast } = useStore();
+  const { appState, selection, clearSelection, select, setRightTab, toast } = useStore();
   const [chat, setChat] = useState<ChatTurn[]>(getChat);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
+  const [scopeDays, setScopeDays] = useState<"all" | "7d" | "30d">(getAiScopeDays);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
   }, [chat.length, busy]);
+
+  const scope = useMemo(() => {
+    if (scopeDays === "all") return { chat_ids: [...selection], date_from: null, date_to: null };
+    const to = new Date().toISOString().slice(0, 10);
+    const from = new Date(Date.now() - (scopeDays === "7d" ? 6 : 29) * 864e5)
+      .toISOString().slice(0, 10);
+    return { chat_ids: [...selection], date_from: from, date_to: to };
+  }, [selection, scopeDays]);
 
   const ask = async (q: string) => {
     const qt = q.trim();
@@ -35,7 +45,7 @@ export function AiPanel() {
     setBusy(true);
     setChat(pushChat({ question: qt, answer: null, sources: [], keywords: [] }));
     try {
-      const r = await api.ask(qt);
+      const r = await api.ask(qt, scope);
       setChat(
         pushChat({
           question: qt,
@@ -86,6 +96,9 @@ export function AiPanel() {
     );
   }
 
+  const scopeSummary = `${selection.size ? `${selection.size} group${selection.size > 1 ? "s" : ""}` : "all groups"}`
+    + (scopeDays === "all" ? "" : ` · last ${scopeDays === "7d" ? "7" : "30"} days`);
+
   return (
     <div className="ai-panel">
       {chat.length === 0 && !busy && (
@@ -98,10 +111,12 @@ export function AiPanel() {
 
       <div className="ai-chat">
         {chat.map((turn, i) => (
-          <TurnView key={i} turn={turn} onOpenSource={openSource} />
+          <TurnView key={i} turn={turn} onOpenSource={openSource}
+                    providerHost={appState?.ai_provider_host}
+                    providerModel={appState?.ai_model} />
         ))}
         {busy && (
-          <div className="ai-thinking"><span className="spinner" /> searching the archive and thinking…</div>
+          <div className="ai-thinking"><span className="spinner" /> searching {scopeSummary} and thinking…</div>
         )}
         <div ref={bottomRef} />
       </div>
@@ -115,6 +130,27 @@ export function AiPanel() {
           ))}
         </div>
       )}
+
+      <div className="ai-scope-row" title="The AI only retrieves messages inside this scope">
+        <span className="label">Scope:</span>
+        {selection.size > 0 ? (
+          <button className="chip on" onClick={() => clearSelection()}
+                  title="Remove the group filter - search all tracked groups">
+            👥 {selection.size} group{selection.size > 1 ? "s" : ""} <span className="x">✕</span>
+          </button>
+        ) : (
+          <span className="chip on static" title="Uses the group selection in the sidebar">
+            🌍 all groups
+          </span>
+        )}
+        {(["all", "7d", "30d"] as const).map((c) => (
+          <button key={c}
+                  className={`chip ${scopeDays === c ? "on" : ""}`}
+                  onClick={() => { setScopeDays(c); setAiScopeDays(c); }}>
+            {c === "all" ? "All time" : c === "7d" ? "7 days" : "30 days"}
+          </button>
+        ))}
+      </div>
 
       <div className="ai-input-row">
         <textarea
@@ -138,8 +174,8 @@ export function AiPanel() {
       <div className="ai-disclosure">
         {appState && (
           <span>
-            Answers send retrieved message excerpts to <b>{appState.ai_provider_host}</b> ({appState.ai_model}).
-            Nothing is sent unless you ask.
+            Answers send retrieved message excerpts to <b>{appState.ai_provider_host}</b> ({appState.ai_model})
+            within: {scopeSummary}. Nothing is sent unless you ask.
           </span>
         )}
         {chat.length > 0 && (
@@ -150,11 +186,15 @@ export function AiPanel() {
   );
 }
 
-function TurnView({ turn, onOpenSource }: {
+function TurnView({ turn, onOpenSource, providerHost, providerModel }: {
   turn: ChatTurn;
   onOpenSource: (s: ChatTurn["sources"][number]) => void;
+  providerHost?: string;
+  providerModel?: string;
 }) {
   const { select, setRightTab, toast } = useStore();
+  const [exporting, setExporting] = useState(false);
+
   // citation clicks inside the answer open the cited message
   const onAnswerClick = (e: React.MouseEvent) => {
     const el = (e.target as HTMLElement).closest("[data-cite]");
@@ -177,6 +217,25 @@ function TurnView({ turn, onOpenSource }: {
     })();
   };
 
+  const exportAnswer = async () => {
+    if (!turn.answer) return;
+    setExporting(true);
+    try {
+      const name = await api.exportAiAnswer({
+        question: turn.question,
+        answer: turn.answer,
+        sources: turn.sources.map((s) => ({ chat_id: s.chat_id, msg_id: s.msg_id })),
+        provider_host: providerHost,
+        model: providerModel,
+      });
+      toast(`Exported: ${name}`, "good");
+    } catch (e) {
+      toast((e as Error).message, "err");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="ai-turn">
       <div className="ai-q" dir="auto">{turn.question}</div>
@@ -188,6 +247,10 @@ function TurnView({ turn, onOpenSource }: {
             {turn.fallback === "recent"
               ? "No keyword hits — answer based on the most recent messages."
               : `Based on ${turn.sources.length} retrieved message${turn.sources.length === 1 ? "" : "s"}.`}
+            <button className="link" disabled={exporting}
+                    onClick={() => void exportAnswer()} style={{ marginInlineStart: 8 }}>
+              {exporting ? "exporting…" : "export .md"}
+            </button>
           </div>
           {turn.sources.length > 0 && (
             <details className="ai-sources">

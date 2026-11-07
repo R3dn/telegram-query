@@ -20,23 +20,33 @@ Telegram session never leave it.
 
 - **Local-first & private** — SQLite archive on your disk; no cloud, no
   telemetry. The server binds to `127.0.0.1` by default.
-- **Full-history sync** — checkpointed backfills that pause/resume without
-  losing progress, incremental updates, edit detection, flood-limit
-  handling, and a job queue with stop/cancel controls.
-- **Fast search** — FTS5 trigram index with Arabic/English normalization
-  (diacritics, alef/ya variants, taa marbuta), mixed-language queries,
-  term highlighting, date/sender/media filters, and search history.
-- **Grounded Ask-AI** — questions in Arabic or English answered from
-  retrieved messages only, with `[n]` citations that jump to the original
-  message. Works with any OpenAI-compatible endpoint (OpenAI, Groq,
-  OpenRouter, Ollama, LM Studio, vLLM…). Optional — disable it and nothing
-  ever leaves your machine.
+- **Full-history sync + auto-sync** — checkpointed backfills that
+  pause/resume without losing progress, incremental updates, edit
+  detection, flood-limit handling, a job queue with stop/cancel controls,
+  and a restart-proof automatic sync schedule (on by default, every 6h,
+  configurable).
+- **Fast bilingual search** — FTS5 trigram index with Arabic/English
+  normalization: diacritics, alef/ya variants, taa marbuta, plus extended
+  rules — Arabic-Indic digits (٢٥→25), chat elongation (هااااي→هاي),
+  Arabizi folding inside Latin words, and a Gulf dialect map (شلون↔كيف) —
+  with mixed-language queries, term highlighting, date/sender/media/star
+  filters, and search history.
+- **Grounded Ask-AI with visible scope** — questions in Arabic or English
+  answered from retrieved messages only, with `[n]` citations that jump to
+  the original message, removable scope chips showing exactly which groups
+  and dates are searched, and one-click Markdown export. Works with any
+  OpenAI-compatible endpoint (OpenAI, Groq, OpenRouter, Ollama, LM Studio,
+  vLLM…). Optional — disable it and nothing ever leaves your machine.
+- **Keep what matters** — star messages, attach private notes (never sent
+  to AI), save searches under a name and re-run them any time, and open any
+  message in its original Telegram chat with verified deep links.
 - **Works with zero groups on day one** — a built-in wizard walks you
   through API credentials, Telegram login (phone + code + 2FA), group
   selection, and your first sync.
 - **Polished bilingual UI** — React frontend with light/dark themes,
   resizable panels, mobile navigation, first-class RTL and mixed-direction
-  text rendering.
+  text rendering, and Markdown/JSON exports that are useful outside the
+  app.
 
 ![Onboarding wizard](docs/screenshots/onboarding.png)
 
@@ -107,11 +117,16 @@ automatically). Full reference: [docs/configuration.md](docs/configuration.md).
 | `TG_SESSION_PATH` | `data/tg_session` | Session file location |
 | `TG_DB_PATH` | `data/messages.db` | Archive database location |
 | `SYNC_DAYS` | `3` | Edit re-scan window |
+| `NORMALIZATION` | `extended` | Search normalization level (`standard` = v0.3 rules) |
+| `TGQ_DIALECT_MAP` | built-in Gulf map | JSON override for dialect word mapping |
 | `AI_BASE_URL` | OpenAI | Any OpenAI-compatible endpoint |
 | `AI_API_KEY` | — | Enables Ask-AI when set |
 | `AI_MODEL` | `gpt-4o-mini` | Model name |
 | `TGQ_GROUPS_HINT` | — | Optional community description to sharpen keyword extraction |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | Local bind address — keep it local |
+
+The auto-sync schedule (on/off + interval) is configured in the app's
+Settings screen and stored in your local database.
 
 ## Architecture
 
@@ -131,11 +146,12 @@ ruff check . && pytest
 cd web && npm install && npm run typecheck && npm test && npm run build
 ```
 
-Automated suites cover the DB/migrations, bilingual search, sync
-checkpoints and resume, the job queue, the AI pipeline (with a mocked
-provider - no real credentials needed), setup/auth flows, and the
-citation mapping in the frontend. Contributions welcome - see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+Automated suites cover the DB/migrations, bilingual + Gulf/Arabizi search
+normalization, sync checkpoints and resume, the job queue, the auto-sync
+scheduler, the AI pipeline and scope (with a mocked provider - no real
+credentials needed), setup/auth flows, saved searches, bookmarks and
+notes, deep links, exports, and the citation mapping in the frontend.
+Contributions welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Known limitations
 

@@ -3,6 +3,61 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-11-07
+
+Strengthen the core: automatic sync, AI scope control, deep links,
+saved searches, bookmarks with private notes, exports, and extended
+Arabic/Arabizi search normalization. Same local-first, single-SQLite,
+no-Docker architecture.
+
+### Added
+- **Auto-sync scheduler**: DB-persisted schedule (default on, every 6h,
+  configurable 15 min - 7 days in Settings) that survives restarts and
+  catches up after downtime. Shows next/last sync in the sidebar; never
+  overlaps a running sync; manual sync always available.
+- **AI scope chips**: Ask AI now shows exactly which groups and date range
+  it will search - removable chips (selected groups from the sidebar +
+  All time / 7 days / 30 days). Explicit scope overrides the model's own
+  group/date guesses and restricts retrieval for real, including the
+  recent-messages fallback.
+- **Open-in-Telegram deep links**: verified `t.me` links per message for
+  public groups (`t.me/<username>/<id>`) and private supergroups/channels
+  (`t.me/c/<id>/<id>`, member-only by Telegram's design), with "copy
+  message link" on feed details, bookmarks, and AI-source rows. Chats
+  without message links (basic groups) say so instead of fabricating URLs.
+- **Saved searches**: name the current query + filters (groups, dates,
+  sender, media, sort) and re-run them any time. Saved searches store the
+  definition, never stale result rows; rename/duplicate/delete inline in
+  the sidebar; exportable as JSON.
+- **Bookmarks & private notes**: star any message, attach a Unicode-safe
+  Arabic/English note (4k chars), edit any time. Starred-only feed filter,
+  full-text note search, and a dedicated Bookmarks workspace with jump-to-
+  message and Telegram links. Notes are app metadata: they never enter AI
+  retrieval context and are deleted with their message (cascading FK).
+- **Exports**: Markdown + JSON downloads for bookmarks (with notes,
+  citations, and Telegram links), saved searches (JSON), and any AI answer
+  with its re-verified sources - UTF-8 with full Arabic support, safe
+  filenames, no secrets ever.
+- **Extended search normalization** (`NORMALIZATION`, default): Arabic-Indic
+  digit folding (٢٥ → 25), chat-elongation collapse (هااااي → هاي), Arabizi
+  digit folding inside Latin words (3arabi → عarabi; multi-digit runs like
+  prices and promo codes are never folded), and a small configurable Gulf
+  dialect map (شلون → كيف, وين → اين, ...; `TGQ_DIALECT_MAP` overrides).
+  Index- and query-side stay consistent: a one-time background reindex
+  (visible in Jobs, cancellable, resumable) is queued automatically after
+  upgrading an existing archive; `NORMALIZATION=standard` keeps exact
+  v0.3 behavior. Original message text is never modified.
+- **Search normalization rebuild** action in Settings ("Rebuild search
+  index") for manual re-indexing after rule changes.
+- Post-sync hook seam in the job system (foundation for incremental
+  knowledge features).
+
+### Changed
+- Ask AI responses now echo the applied scope and the provider model.
+- New tables `app_settings`, `saved_searches`, `bookmarks` (schema v3) via
+  additive-only, idempotent migrations; foreign keys enforced so
+  bookmarks can never orphan.
+
 ## [0.3.0] - 2026-11-07
 
 First public, open-source release. Productization of the personal

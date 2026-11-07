@@ -69,6 +69,38 @@ export function jobLabel(name: string | null | undefined): string {
       track: "Group backfill",
       dialogs: "Group listing",
       auth: "Login",
+      reindex: "Reindex",
     } as Record<string, string>
   )[name ?? ""] ?? "Job";
+}
+
+/** Human label for a scheduler interval in minutes. */
+export function intervalLabel(min: number): string {
+  if (min % 1440 === 0) return min === 1440 ? "every day" : `every ${min / 1440} days`;
+  if (min % 60 === 0) return `every ${min / 60}h`;
+  return `every ${min} min`;
+}
+
+/** "14:32" style local time from an ISO datetime string. */
+export function fmtClock(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, {
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return "—";
+  }
+}
+
+/** Local date+time for scheduler / bookmark display. */
+export function fmtLocal(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
 }

@@ -10,6 +10,43 @@ export interface Message {
   has_media: number;
   edited: number;
   chat_title: string;
+  /** v0.4 */
+  bookmarked?: number;        // 1 when starred
+  bookmark_note?: string | null;
+  tg_link?: string | null;    // open-in-Telegram link, null when none exists
+}
+
+export interface SavedSearch {
+  id: number;
+  name: string;
+  q: string;
+  chat_ids: number[];
+  sender: string;
+  media: string;
+  date_from: string;
+  date_to: string;
+  sort: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface BookmarkRow extends Message {
+  note: string;
+  bookmarked_at: string;
+  note_updated_at: string;
+}
+
+export interface SchedulerState {
+  enabled: boolean;
+  interval_min: number;
+  next_due: string | null;
+  last_success: string | null;
+}
+
+export interface AskScope {
+  chat_ids: number[];
+  date_from: string | null;
+  date_to: string | null;
 }
 
 export interface Group {
@@ -71,6 +108,8 @@ export interface AskResult {
   keywords_tried: string[][];
   fallback?: string | null;
   provider_host?: string;
+  provider_model?: string;
+  scope?: AskScope;
 }
 
 export interface AuthState {

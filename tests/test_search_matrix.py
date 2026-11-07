@@ -20,12 +20,17 @@ def seed_matrix(api_client):
         (4, "2026-01-04", "meeting on 2026-01-05 at 10:30 room 12"),
         (5, "2026-01-05", "price: 199.99 SAR ~ 20% off (in-store only!)"),
         (6, "2026-01-06", "great deal!! 🔥🍕 #discount #pizza_offer"),
-        (7, "2026-01-07", "x" * 5000),  # very long message
+        (7, "2026-01-07", "lorem ipsum dolor sit amet consectetur " * 150),  # ~5.4k chars
         (8, "2026-01-08", ""),  # media-only (empty text)
         (9, "2026-01-09", "color colour"),  # similar words
         (10, "2026-01-10", "spam spam spam spam"),  # repeated words
         (11, "2026-01-11", "عرض خاص على البيتزا اليوم فقط"),  # exact dup of 1
         (12, "2026-01-12", "المطاعم أرقام الهاتف ٠١٢٣٤٥٦٧٨٩"),  # Arabic-Indic digits
+        (13, "2026-01-13", "مبروووووووك عليك التوظيف الجديد"),  # elongation
+        (14, "2026-01-14", "شلون أخبارك اليوم"),               # Gulf dialect
+        (15, "2026-01-15", "محتاج 3arabi translation tool بسرعة"),  # Arabizi
+        (16, "2026-01-16", "discount 40% off today code SAVE40"),  # price guard
+        (17, "2026-01-17", "وين أقرب فرع لكم؟"),               # dialect وين
     ]
     c = db.get_db()
     try:
@@ -90,12 +95,33 @@ def test_emoji_message_is_searchable_by_text(api_client):
 
 def test_long_message_and_media_only(api_client):
     seed_matrix(api_client)
-    hits = search(api_client, "x" * 200)
+    hits = search(api_client, "lorem ipsum dolor")
     assert {h["msg_id"] for h in hits} == {7}, "long message must be indexed"
     # media-only: no text -> not searchable, but browsable
     assert search(api_client, "image") == []
     page = api_client.get(f"/api/messages?groups={CHAT}&limit=50").json()
     assert 8 in {m["msg_id"] for m in page["messages"]}
+
+
+def test_extended_normalization_retrieval(api_client):
+    """v0.4 normalization: dialect queries hit standard-form matches and
+    vice versa, elongation collapses, Arabizi folds consistently, and
+    prices/promo codes are protected from digit folding."""
+    seed_matrix(api_client)
+    # elongation: query مبروك matches مبروووووووك (13), both collapse
+    assert {h["msg_id"] for h in search(api_client, "مبروك")} == {13}
+    # Gulf dialect: شلون <-> كيف both directions (14)
+    assert {h["msg_id"] for h in search(api_client, "كيف")} == {14}
+    assert {h["msg_id"] for h in search(api_client, "شلون")} == {14}
+    # وين -> اين (17)
+    assert {h["msg_id"] for h in search(api_client, "اين أقرب")} == {17}
+    # Arabizi: 3arabi folds identically at index and query time (15)
+    assert {h["msg_id"] for h in search(api_client, "3arabi translation")} == {15}
+    # false-positive guards: prices and promo codes are never digit-folded
+    assert {h["msg_id"] for h in search(api_client, "discount 40")} == {16}
+    assert {h["msg_id"] for h in search(api_client, "code save40")} == {16}
+    # Arabic-Indic digits fold: a query in either numeral system matches (12)
+    assert 12 in {h["msg_id"] for h in search(api_client, "0123456789")}
 
 
 def test_similar_and_repeated_words(api_client):
