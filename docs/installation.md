@@ -102,7 +102,11 @@ web UI or the CLI.
 ## Upgrading
 
 Pull the new version and reinstall dependencies if `requirements.txt`
-changed. Database schema changes are applied automatically on startup and
+changed. **Restart the app after pulling** — the job system imports the
+sync module lazily at sync time, so a process that keeps running across
+an upgrade pairs its old in-memory modules with the new on-disk sync code
+(symptom: `upsert_message() got an unexpected keyword argument`).
+Database schema changes are applied automatically on startup and
 are **additive-only** — your archive is never dropped or rewritten. The
 only files that matter are your `.env` and your `data/` directory; backing
 those up backs up everything.
@@ -129,4 +133,5 @@ is incremental from then on (deterministic; no AI involved).
 | "A background job is using the Telegram session" | One Telegram operation at a time — stop the running job in the Jobs panel first |
 | Sync seems slow | Large backfills download entire history; they're checkpointed, so you can stop and resume anytime |
 | Sync log: "[group] skipped - chat ID is invalid" | That tracked group no longer resolves — deleted, migrated to a supergroup, or your account left it. The sync skips it and continues; untrack it (`python sync.py --untrack <id>`, find the ID with `--list` or Manage groups) and track the new ID if it migrated |
+| "upsert_message() got an unexpected keyword argument 'reply_to'" | The app process was started before the last upgrade and is mixing old in-memory modules with new on-disk code — stop it fully and start it again. If it persists after a restart, the on-disk copy itself is mixed: `git pull` or re-clone |
 | `database is locked` in logs | Only if you run two instances against the same DB — don't |
