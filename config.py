@@ -24,7 +24,7 @@ load_dotenv(APP_ROOT / ".env")
 
 ENV_FILE = APP_ROOT / ".env"   # written by the setup wizard; tests redirect this
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 
 def _env(*names: str, default: str = "") -> str:
@@ -85,6 +85,17 @@ class Settings:
     ai_max_sources: int
     groups_hint: str
 
+    # ai model routing (v0.7): per-task-type models over the same endpoint.
+    # Empty falls back to ai_model - one provider, different price/quality
+    # tiers: 'extract' = cheap/fast structured tasks, 'synth' = general
+    # reasoning and prose, 'embed' = optional embeddings (v0.8 benchmark).
+    ai_model_extract: str
+    ai_model_synth: str
+    ai_model_embed: str
+    # 0 = unlimited; >0 caps total AI requests per UTC day (honest errors
+    # when reached - deterministic features are never affected)
+    ai_daily_cap: int
+
     # search normalization: "standard" (v0.3 rules) or "extended"
     # (Arabic-Indic digits, elongation collapse, Arabizi folding, Gulf
     # dialect word map). Changing the level requires a one-time reindex of
@@ -98,6 +109,18 @@ class Settings:
     @property
     def ai_configured(self) -> bool:
         return bool(self.ai_api_key)
+
+    def model_for(self, role: str) -> str:
+        """Effective model for a task role: 'extract' | 'synth' | 'embed'.
+        Unset roles fall back to the general AI_MODEL - routing is always
+        optional and never hardcodes a provider or model."""
+        if role == "extract" and self.ai_model_extract:
+            return self.ai_model_extract
+        if role == "synth" and self.ai_model_synth:
+            return self.ai_model_synth
+        if role == "embed" and self.ai_model_embed:
+            return self.ai_model_embed
+        return self.ai_model
 
     @property
     def ai_provider_host(self) -> str:
@@ -140,6 +163,10 @@ def load_settings() -> Settings:
         ai_temperature=float(_env("AI_TEMPERATURE", default="0.2")),
         ai_max_sources=int(_env("AI_MAX_SOURCES", default="80")),
         groups_hint=_env("TGQ_GROUPS_HINT"),
+        ai_model_extract=_env("AI_MODEL_EXTRACT"),
+        ai_model_synth=_env("AI_MODEL_SYNTH"),
+        ai_model_embed=_env("AI_MODEL_EMBED"),
+        ai_daily_cap=max(0, int(_env("TGQ_AI_DAILY_CAP", default="0"))),
         normalization_level=_env("NORMALIZATION", default="extended").strip().lower(),
     )
 

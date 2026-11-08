@@ -23,6 +23,7 @@ import auth as tg_auth
 import config
 import db
 import deals
+import entities
 import jobs
 import scheduler
 from api import ai as ai_api
@@ -31,6 +32,7 @@ from api import auth as auth_api
 from api import bookmarks as bookmarks_api
 from api import deals as deals_api
 from api import digests as digests_api
+from api import discover as discover_api
 from api import exports as exports_api
 from api import faqs as faqs_api
 from api import jobs as jobs_api
@@ -65,6 +67,22 @@ def _start_reindex_if_needed():
         log.exception("could not queue the reindex job")
 
 
+def _start_discover_backfill_if_needed():
+    """v0.7 upgrade: build discovery data (term stats, questions,
+    entities) for existing archives once, as a visible job. Idempotent -
+    the job itself clears the flag."""
+    try:
+        conn = db.get_db()
+        try:
+            if db.get_setting(conn, "needs_discover_backfill") == "1":
+                jobs.JOBS.start("discover", jobs.run_discover_job, front=True)
+                log.info("v0.7 upgrade - discovery backfill job queued")
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("could not queue the discovery backfill job")
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     # check the Telegram session in the background (cheap, cached)
@@ -86,6 +104,15 @@ async def lifespan(app: FastAPI):
     import digests
     if digests.enqueue_due not in jobs.TICK_HOOKS:
         jobs.TICK_HOOKS.append(digests.enqueue_due)
+    # v0.7: discovery stays fresh after every sync - deterministic term
+    # stats + question radar (no AI), and the entity pipeline (gazetteer
+    # matching always; LLM discovery only when opted in)
+    import discover
+    if discover.post_sync_hook not in jobs.POST_SYNC_HOOKS:
+        jobs.POST_SYNC_HOOKS.append(discover.post_sync_hook)
+    if entities.post_sync_hook not in jobs.POST_SYNC_HOOKS:
+        jobs.POST_SYNC_HOOKS.append(entities.post_sync_hook)
+    _start_discover_backfill_if_needed()
     yield
 
 
@@ -97,7 +124,8 @@ for router in (general.router, auth_api.router, archive.router,
                ai_api.router, groups.router, jobs_api.router, setup_api.router,
                scheduler_api.router, saved_api.router, bookmarks_api.router,
                exports_api.router, deals_api.router, research_api.router,
-               monitor_api.router, faqs_api.router, digests_api.router):
+               monitor_api.router, faqs_api.router, digests_api.router,
+               discover_api.router):
     app.include_router(router)
 
 

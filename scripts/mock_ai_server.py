@@ -78,6 +78,22 @@ def respond(system: str, user_text: str) -> str:
                            "date_to": None, "relative_days": None})
     if "extract structured commercial deals" in system:
         return _extract_deals(user_text)
+    if "extract named entities" in system:
+        # deterministic: every brand-looking word the excerpts contain
+        found = []
+        for name in ("Aurora Coffee", "Nimbus Hosting", "GadgetHub",
+                     "Trail Mix Co"):
+            if name.lower() in user_text.lower() and name not in found:
+                found.append(name)
+        return json.dumps({"entities": [
+            {"name": n, "kind": "brand"} for n in found]})
+    if "TIMELINE" in system:  # TOPIC TIMELINE task (prompt may line-wrap)
+        # cite the first two excerpts; include a bogus marker the backend
+        # must strip and report
+        return json.dumps({"timeline_md":
+            "## Timeline\n- Trail discussions started [1]\n"
+            "- Conditions improved over time [2]\n"
+            "- A bogus citation [99] must be stripped."})
     if "careful research analyst" in system:
         return json.dumps({"brief_md":
             "## Executive summary\nThe group discusses hiking trails and "

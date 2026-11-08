@@ -57,6 +57,11 @@ def api_client():
         c.execute("DELETE FROM digests")
         c.execute("DELETE FROM digest_schedules")
         c.execute("DELETE FROM faq_clusters")
+        c.execute("DELETE FROM open_questions")
+        c.execute("DELETE FROM term_daily")
+        c.execute("DELETE FROM entity_mentions")
+        c.execute("DELETE FROM entities")
+        c.execute("DELETE FROM app_settings")
         # NOTE: DELETE FROM an external-content FTS table is a no-op -
         # rebuild the index instead, or stale entries resurface once the
         # content table reuses rowids (cross-test contamination).

@@ -26,7 +26,7 @@ import ai_tasks
 import config
 import db
 
-__all__ = ["discover", "PROMPT_VERSION", "JACCARD_MIN"]
+__all__ = ["discover", "is_question", "PROMPT_VERSION", "JACCARD_MIN"]
 
 PROMPT_VERSION = "faq-v1"
 JACCARD_MIN = 0.6
@@ -52,6 +52,13 @@ def _is_question(text: str) -> bool:
         return False
     return bool(_AR_Q.match(t) or _EN_Q.search(t) or
                 (_HAS_QMARK.search(t) and len(t.split()) >= 3))
+
+
+def is_question(text: str) -> bool:
+    """Public wrapper: the open-questions radar (v0.7) reuses the same
+    bilingual interrogative detection as FAQ discovery - one definition,
+    no duplicate heuristics."""
+    return _is_question(text)
 
 
 def _tokens(text: str) -> set[str]:
@@ -252,6 +259,7 @@ def _draft_answer(conn, cluster, qs, evidence, now):
         payload, _ = ai_tasks.run_json_task(
             ANSWER_SYSTEM, "\n".join(lines), task="faq",
             validate=_validate,
+            model_role="synth",
             cache=(conn, "faq", ai_tasks.scope_hash("faq", {
                 "q": cluster["norm_key"]}), PROMPT_VERSION,
                 ai_tasks.fingerprint_rows(evidence)))

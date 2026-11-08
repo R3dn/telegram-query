@@ -515,3 +515,95 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
 .faq-answer code {
   background: var(--surface-2); padding: 1px 5px; border-radius: 4px;
 }
+
+/* ================= v0.7 additions ================= */
+
+/* Discover sections */
+.disc-section-head {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 18px 18px 8px;
+}
+.disc-section-head:first-child { padding-top: 8px; }
+.disc-title { font-weight: 700; font-size: 13.5px; }
+
+.trend-row {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 18px; border-bottom: 1px solid var(--border-soft);
+}
+.trend-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trend-term {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-size: 14.5px; font-weight: 600; color: var(--accent); text-align: start;
+}
+.trend-term:hover { text-decoration: underline; }
+.trend-sample {
+  display: flex; gap: 8px; font-size: 12px; cursor: pointer;
+  overflow: hidden; align-items: baseline;
+}
+.trend-actions { display: flex; gap: 8px; }
+
+.timeline-panel {
+  margin: 10px 18px; padding: 12px; border: 1px solid var(--border-soft);
+  border-radius: 10px; background: var(--surface);
+}
+.timeline-panel .brief-md { margin-top: 6px; }
+
+.story-card {
+  margin: 0 18px 8px; padding: 8px 10px;
+  border: 1px solid var(--border-soft); border-radius: 10px;
+  background: var(--surface);
+}
+.story-card summary { cursor: pointer; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.story-text { flex: 1; min-width: 200px; font-size: 12.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+.story-groups { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+
+.q-row {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 18px; border-bottom: 1px solid var(--border-soft);
+}
+.q-main { display: flex; flex-direction: column; gap: 2px; }
+.q-text {
+  background: none; border: none; padding: 0; cursor: pointer; text-align: start;
+  font-size: 13.5px; color: var(--text); line-height: 1.5; word-break: break-word;
+}
+.q-text:hover { color: var(--accent); }
+.q-meta { font-size: 11.5px; }
+.q-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.q-actions { display: flex; gap: 8px; align-items: center; padding: 0 18px 6px; flex-wrap: wrap; }
+.q-faq summary { color: var(--accent); font-size: 12px; cursor: pointer; }
+.q-faq > div { font-size: 12.5px; color: var(--dim); margin-top: 4px; line-height: 1.5; }
+
+.act-row {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 7px 18px; background: none; border: none; cursor: pointer;
+  border-bottom: 1px solid var(--border-soft); text-align: start;
+}
+.act-row:hover { background: var(--surface); }
+.act-row .g-title { flex: 1; min-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spark { flex: none; opacity: .9; }
+
+/* Entities */
+.entity-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 18px; border-bottom: 1px solid var(--border-soft);
+}
+.entity-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  background: none; border: none; cursor: pointer; text-align: start; padding: 0;
+}
+.entity-main:hover .g-title { color: var(--accent); }
+.entity-detail { padding: 12px 18px; }
+
+/* Conversation block (Details panel) */
+.conv-block { display: flex; flex-direction: column; gap: 6px; }
+.conv-rows { display: flex; flex-direction: column; gap: 1px; max-height: 320px; overflow-y: auto; }
+.conv-row {
+  display: flex; gap: 7px; align-items: baseline; width: 100%;
+  background: none; border: none; cursor: pointer; text-align: start;
+  padding: 4px 6px; border-radius: 6px; font-size: 12.5px;
+}
+.conv-row:hover { background: var(--surface-2); }
+.conv-row.target { background: var(--surface-2); outline: 1px solid var(--accent); }
+.conv-sender { color: var(--accent); font-weight: 600; flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+.conv-note { font-size: 11.5px; }

@@ -3,6 +3,84 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0] - 2026-11-08
+
+Community Discovery: understand what's happening across your communities
+without reading everything. The whole discovery core is deterministic -
+no AI provider required, no cost per message - and the app now opens on
+a Discover view instead of the raw feed.
+
+### Added
+- **Trending topics & term analytics**: per-group daily term counts
+  (normalized unigrams + bigrams over `text_norm`, bilingual stopword
+  pack) are built incrementally above per-chat watermarks after every
+  sync - never a full-archive scan. Burst scoring compares the recent
+  window against the prior one; every topic links to a real sample
+  message and runs as a feed search in one click. `sort=burst|volume`.
+- **Discover home (new landing view)**: trending topics (with per-topic
+  "Timeline ✦"), cross-group stories, the unanswered-questions radar,
+  and 30-day group activity with sparklines - every card reaches the
+  original messages in ≤2 clicks. Group scope chips reuse the sidebar
+  selection; "Rebuild data" re-runs the full backfill as a visible job.
+- **Cross-group stories**: near-duplicate posts that appeared in 2+
+  groups inside the window (forwarded announcements/offers) are grouped
+  with every occurrence kept as a source; all-stopword chatter (greeting
+  spam) is never a story.
+- **Unanswered-questions radar**: questions detected with the same
+  bilingual interrogative rules as FAQ discovery, tracked when they have
+  no substantive reply. Replies arriving in later synces auto-resolve
+  their parent; a reply that is itself a question is a follow-up, not
+  an answer. Human statuses (answered/ignored) are never overwritten by
+  rescans. When an APPROVED FAQ answer matches, it's offered inline -
+  nothing becomes trusted knowledge without the existing human gate.
+- **Entity recognition & tracking**: a gazetteer of brands, products,
+  orgs, projects, places, events (NEVER individual people - no member
+  analytics exists in this product). Seeded from extracted deal vendors,
+  extended manually or by an opt-in AI discovery pass (extraction model,
+  incremental batches, fingerprint-cached, honest failure). Mention
+  matching is deterministic against `text_norm`; every mention keeps
+  its source message (FK cascade). Merge/rename/ignore are human
+  controls; per-entity trend, group spread, and a 30-day series.
+- **Conversation view**: "View in conversation" on any message opens the
+  reply chain (where captured) plus the same-chat window - honest about
+  pre-0.5 messages lacking `reply_to`, never inferring messages.
+- **Topic timeline ("what changed about X")**: retrieval for one topic,
+  synthesized into a dated, cited timeline (synthesis model). Backend
+  citation validation strips unresolvable markers; results cached by
+  source fingerprint - an unchanged topic is never re-paid.
+- **AI model routing**: optional per-task-type models over the same
+  OpenAI-compatible endpoint - `AI_MODEL_EXTRACT` (cheap/fast structured
+  tasks: deals, entity discovery, keyword extraction), `AI_MODEL_SYNTH`
+  (answers, briefs, digests, FAQ answers, timelines), `AI_MODEL_EMBED`
+  (reserved for the v0.8 embeddings benchmark). All fall back to
+  `AI_MODEL`; nothing is hardcoded to a provider. Ask-AI already routes
+  keyword extraction vs answering accordingly.
+- **Daily AI budget guard**: `TGQ_AI_DAILY_CAP` (0 = unlimited) caps
+  total AI requests per UTC day with honest errors; deterministic
+  features are never affected. Usage is now recorded per model and
+  surfaced in `/api/ai/usage`.
+- Schema v6: `term_daily`, `entities`, `entity_mentions`,
+  `open_questions`, `ai_usage.model` (additive-only; existing archives
+  get a one-time visible discovery backfill job on the next start).
+- Sidebar gains a "Discover" group (Discover, Entities); mobile bottom
+  nav leads with Discover. `scripts/seed_demo.py` now seeds cross-group
+  announcements, Q&A threads, unanswered questions, recurring brand
+  mentions, and Arabic content - and pre-builds discovery data.
+
+### Changed
+- The app's landing view is Discover (Browse remains one click away).
+- FAQ question detection is now shared explicitly (`faq.is_question`)
+  by the unanswered-questions radar - one definition, no duplicate
+  heuristics.
+
+### Deferred (documented in docs/decisions/)
+- Multi-account support (v0.10 candidate): rejected for now - single
+  session is a core invariant; a second installation via `TG_DATA_DIR`
+  is the supported pattern.
+- Semantic/embedding retrieval: benchmark-gated for v0.8, off by
+  default - FTS5 measured sufficient at 500k messages.
+- Media/OCR: gated on the opt-in media cache planned for v0.10.
+
 ## [0.6.0] - 2026-11-07
 
 Monitor: from reactive search to proactive knowledge discovery. Watchlists

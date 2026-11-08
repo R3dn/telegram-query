@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   appState: vi.fn(async () => ({
-    version: "0.6.0", telegram_configured: true, authenticated: true,
+    version: "0.7.0", telegram_configured: true, authenticated: true,
     auth_user: "e2e", tracked_groups: 10, messages: 400,
     pending_backfills: 0, last_message: null, ai_configured: true,
     ai_provider_host: "127.0.0.1", ai_model: "e2e-mock",
@@ -110,6 +110,30 @@ const mocks = vi.hoisted(() => ({
     by_task: { ask: { requests: 3, tokens_in: 10, tokens_out: 5 } },
     total: { requests: 3, tokens_in: 10, tokens_out: 5 },
   })),
+  discoverTrending: vi.fn(async () => [
+    { term: "trail conditions", recent: 5, baseline: 1, score: 3.5, chats: 1,
+      sample: { chat_id: -10012340002, msg_id: 1000, date: "2026-11-07",
+                chat_title: "Weekend Hikers", text: "trail conditions report" } },
+  ]),
+  discoverStories: vi.fn(async () => []),
+  discoverQuestions: vi.fn(async () => []),
+  discoverActivity: vi.fn(async () => ({
+    days: 30, groups: [], hours: [],
+    totals: { messages: 0, active_groups: 0, messages_per_day: 0 },
+  })),
+  questionSetStatus: vi.fn(async () => ({ ok: true, status: "answered" })),
+  questionScan: vi.fn(async () => ({ ok: true, new_open: 0, open: 0 })),
+  discoverRebuild: vi.fn(async () => ({ started: true })),
+  topicTimeline: vi.fn(async () => ({ term: "t", timeline_md: "md", sources: [] })),
+  entitiesList: vi.fn(async () => []),
+  entitiesSettings: vi.fn(async () => ({ auto: false, ai_configured: true })),
+  entitiesAuto: vi.fn(async () => ({ auto: false })),
+  entityGet: vi.fn(async () => null),
+  entityCreate: vi.fn(),
+  entityPatch: vi.fn(),
+  entityMerge: vi.fn(),
+  entityDelete: vi.fn(),
+  messageContext: vi.fn(async () => ({ target: {}, ancestors: [], replies: [], rows: [] })),
 }));
 
 vi.mock("../src/api/client", () => ({ api: mocks }));
@@ -147,11 +171,17 @@ describe("full app: every workspace", () => {
     Element.prototype.scrollIntoView = () => {};
   });
 
-  it("renders the feed on first load", async () => {
+  it("lands on Discover, with the feed one click away", async () => {
     renderApp();
+    // v0.7: Discover is the landing view
+    await waitFor(() =>
+      expect(screen.getByText("Trending topics")).toBeTruthy());
+    expect(screen.getByText("trail conditions")).toBeTruthy();
+    expect(screen.getByText("Browse & search")).toBeTruthy();
+    // Browse is still one click away and shows the feed
+    await open(/Browse & search/);
     await waitFor(() =>
       expect(screen.getByText(/the new hiking trail is muddy/)).toBeTruthy());
-    expect(screen.getByText("Browse & search")).toBeTruthy();
   });
 
   it("navigates to Bookmarks with content and export actions", async () => {

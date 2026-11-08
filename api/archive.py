@@ -84,6 +84,30 @@ def message_one(chat_id: int, msg_id: int):
         return _decorate([dict(row)])[0]
 
 
+@router.get("/api/message/{chat_id}/{msg_id}/context")
+def message_context(chat_id: int, msg_id: int, before: int = 12,
+                    after: int = 12):
+    """Conversation reconstruction around one message (v0.7): the reply
+    chain where captured, direct replies, and the same-chat id window.
+    Honest limits: reply_to is captured going forward (v0.5+); the
+    window is Telegram's natural message order."""
+    with open_db() as conn:
+        ctx = db.conversation(conn, chat_id, msg_id,
+                              before=min(before, 50), after=min(after, 50))
+        if ctx is None:
+            return JSONResponse({"error": "message not found"}, status_code=404)
+        out = {"target": _decorate([ctx["target"]])[0],
+               "ancestors": _decorate(ctx["ancestors"]),
+               "replies": _decorate(ctx["replies"]),
+               "rows": []}
+        for r in ctx["rows"]:
+            d = _decorate([r])[0]
+            d["is_target"] = r.get("is_target", 0)
+            d["is_reply"] = r.get("is_reply", 0)
+            out["rows"].append(d)
+        return out
+
+
 @router.get("/api/senders")
 def senders(groups: str = ""):
     with open_db() as conn:

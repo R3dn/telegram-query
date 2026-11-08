@@ -352,10 +352,69 @@ CREATE TABLE IF NOT EXISTS digest_citations (
     FOREIGN KEY (chat_id, msg_id) REFERENCES messages(chat_id, msg_id)
         ON DELETE CASCADE
 );
+
+-- v0.7: discovery layer --------------------------------------------------
+-- Daily per-chat term counts over normalized text (unigrams + bigrams).
+-- Built incrementally above a watermark; powers trending-topic burst
+-- scoring deterministically (no AI involved).
+CREATE TABLE IF NOT EXISTS term_daily (
+    chat_id INTEGER NOT NULL,
+    day     TEXT NOT NULL,             -- UTC YYYY-MM-DD
+    term    TEXT NOT NULL,             -- normalized token or "a b" bigram
+    n       INTEGER NOT NULL DEFAULT 0, -- messages containing the term
+    PRIMARY KEY (chat_id, day, term)
+);
+CREATE INDEX IF NOT EXISTS idx_term_daily_day ON term_daily(day);
+CREATE INDEX IF NOT EXISTS idx_term_daily_term ON term_daily(term, day);
+
+-- Named entities (brands, products, orgs, projects, places, events -
+-- NEVER individual people). Gazetteer entries are matched against
+-- text_norm deterministically; every mention keeps its source message.
+CREATE TABLE IF NOT EXISTS entities (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    norm_name  TEXT NOT NULL UNIQUE,   -- db.normalize_text(name)
+    kind       TEXT NOT NULL DEFAULT 'other',
+    aliases    TEXT NOT NULL DEFAULT '[]',  -- JSON normalized extra names
+    source     TEXT NOT NULL DEFAULT 'auto', -- deals | manual | llm
+    ignored    INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS entity_mentions (
+    entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    chat_id   INTEGER NOT NULL,
+    msg_id    INTEGER NOT NULL,
+    date      TEXT NOT NULL,
+    PRIMARY KEY (entity_id, chat_id, msg_id),
+    FOREIGN KEY (chat_id, msg_id) REFERENCES messages(chat_id, msg_id)
+        ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_date ON entity_mentions(entity_id, date);
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_msg ON entity_mentions(chat_id, msg_id);
+
+-- Unanswered-questions radar: questions detected with no substantive
+-- reply. Human-controlled status; replies arrive incrementally.
+CREATE TABLE IF NOT EXISTS open_questions (
+    chat_id     INTEGER NOT NULL,
+    msg_id      INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    asked_at    TEXT NOT NULL,
+    replies     INTEGER NOT NULL DEFAULT 0,
+    followers   INTEGER NOT NULL DEFAULT 0,
+    status      TEXT NOT NULL DEFAULT 'open',  -- open | answered | ignored
+    answered_by INTEGER,                       -- best-effort msg pointer
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (chat_id, msg_id),
+    FOREIGN KEY (chat_id, msg_id) REFERENCES messages(chat_id, msg_id)
+        ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_open_questions_status
+    ON open_questions(status, asked_at);
 """
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def _migrate(conn):
@@ -398,6 +457,21 @@ def _migrate(conn):
         # v5: monitoring layer (watchlists/alerts/digests/faqs, created by
         # SCHEMA). No data transforms needed.
         current = 5
+    if current < 6:
+        # v6: discovery layer (term_daily/entities/entity_mentions/
+        # open_questions, created by SCHEMA) + per-model usage recording.
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")]
+        if "model" not in cols:
+            conn.execute("ALTER TABLE ai_usage ADD COLUMN model "
+                         "TEXT NOT NULL DEFAULT ''")
+        # Existing archives need a one-time discovery backfill (visible
+        # job, queued by app.py on the next start; idempotent).
+        n = conn.execute("SELECT COUNT(*) c FROM messages").fetchone()["c"]
+        if n:
+            conn.execute(
+                "INSERT OR REPLACE INTO app_settings (key, value) "
+                "VALUES ('needs_discover_backfill', '1')")
+        current = 6
     conn.execute(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)",
         (str(current),))
@@ -745,6 +819,75 @@ def recent(conn, chat_ids=None, days=7, limit=500):
     query += " ORDER BY m.date DESC LIMIT ?"
     params.append(limit)
     return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def conversation(conn, chat_id: int, msg_id: int, before: int = 12,
+                 after: int = 12) -> dict | None:
+    """Reconstruct the conversation around one message (v0.7).
+
+    Honest about data limits: ``reply_to`` is only captured going forward
+    (v0.5+), so the reply chain is completed with a same-chat message-id
+    window (Telegram's natural order) around the target. Every returned
+    row is the original archived message - nothing is inferred.
+
+    Returns {"target", "ancestors", "replies", "rows"} or None when the
+    message does not exist. ``rows`` is the chronological context window
+    (target flagged with is_target, direct replies flagged is_reply).
+    """
+    target = conn.execute(
+        """SELECT m.*, c.title AS chat_title, c.username AS chat_username
+           FROM messages m JOIN chats c ON c.chat_id = m.chat_id
+           WHERE m.chat_id=? AND m.msg_id=?""",
+        (chat_id, msg_id)).fetchone()
+    if target is None:
+        return None
+
+    # reply chain upward (captured going forward; cycle-safe, max 10 hops)
+    ancestors, seen, cur = [], {(chat_id, msg_id)}, target["reply_to"]
+    while cur is not None and (chat_id, cur) not in seen and len(ancestors) < 10:
+        row = conn.execute(
+            """SELECT m.*, c.title AS chat_title, c.username AS chat_username
+               FROM messages m JOIN chats c ON c.chat_id = m.chat_id
+               WHERE m.chat_id=? AND m.msg_id=?""",
+            (chat_id, cur)).fetchone()
+        if row is None:
+            break
+        ancestors.append(dict(row))
+        seen.add((chat_id, cur))
+        cur = row["reply_to"]
+    ancestors.reverse()
+
+    # direct replies to the target (captured going forward)
+    replies = [dict(r) for r in conn.execute(
+        """SELECT m.*, c.title AS chat_title, c.username AS chat_username
+           FROM messages m JOIN chats c ON c.chat_id = m.chat_id
+           WHERE m.chat_id=? AND m.reply_to=?
+           ORDER BY m.msg_id LIMIT 20""", (chat_id, msg_id)).fetchall()]
+    reply_ids = {(chat_id, r["msg_id"]) for r in replies}
+
+    # same-chat id window around the target = the visible conversation
+    lo = conn.execute(
+        "SELECT MIN(msg_id) m FROM (SELECT msg_id FROM messages "
+        "WHERE chat_id=? AND msg_id<? ORDER BY msg_id DESC LIMIT ?)",
+        (chat_id, msg_id, max(1, before))).fetchone()["m"]
+    hi = conn.execute(
+        "SELECT MAX(msg_id) m FROM (SELECT msg_id FROM messages "
+        "WHERE chat_id=? AND msg_id>? ORDER BY msg_id ASC LIMIT ?)",
+        (chat_id, msg_id, max(1, after))).fetchone()["m"]
+    where, params = "m.chat_id=? AND m.msg_id>=?", [chat_id, lo or msg_id]
+    if hi is not None:
+        where += " AND m.msg_id<=?"
+        params.append(hi)
+    rows = [dict(r) for r in conn.execute(
+        f"""SELECT m.*, c.title AS chat_title, c.username AS chat_username
+            FROM messages m JOIN chats c ON c.chat_id = m.chat_id
+            WHERE {where}
+            ORDER BY m.msg_id""", params)]
+    for r in rows:
+        r["is_target"] = 1 if r["msg_id"] == msg_id else 0
+        r["is_reply"] = 1 if (chat_id, r["msg_id"]) in reply_ids else 0
+    return {"target": dict(target), "ancestors": ancestors,
+            "replies": replies, "rows": rows}
 
 
 def stats(conn):

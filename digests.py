@@ -148,6 +148,7 @@ def generate(conn, chat_ids=None, period_start=None, period_end=None,
          f"Message excerpts:\n{_fmt_rows(rows)}"),
         task="digest",
         validate=_validate,
+        model_role="synth",
         cache=(conn, "digest", ai_tasks.scope_hash("digest", {
             "period": (period_start or "")[:10], "n": len(rows)}),
             PROMPT_VERSION, fp))

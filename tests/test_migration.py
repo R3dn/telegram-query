@@ -67,11 +67,17 @@ def test_upgrade_from_v2_preserves_data_and_flags_reindex(tmp_path):
         for t in ("app_settings", "saved_searches", "bookmarks",
                   "deals", "briefs", "brief_versions", "ai_task_cache",
                   "ai_usage", "watchlists", "alerts", "digest_schedules",
-                  "digests", "faq_clusters"):
+                  "digests", "faq_clusters", "term_daily", "entities",
+                  "entity_mentions", "open_questions"):
             conn.execute(f"SELECT 1 FROM {t}").fetchone()
         # reindex flagged (extended normalization + existing messages)
         if config.settings.normalization_level == "extended":
             assert db.get_setting(conn, "needs_reindex") == "1"
+        # v6: per-model usage recording + discovery backfill for
+        # archives that already have messages (visible job on next start)
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")]
+        assert "model" in cols
+        assert db.get_setting(conn, "needs_discover_backfill") == "1"
     finally:
         conn.close()
 
@@ -99,11 +105,15 @@ def test_fresh_db_needs_no_reindex(tmp_path):
     conn = db.get_db(path)
     try:
         assert db.get_setting(conn, "needs_reindex") is None
+        # no existing messages -> no discovery backfill needed either
+        assert db.get_setting(conn, "needs_discover_backfill") is None
         v = conn.execute("SELECT value FROM schema_meta WHERE key='version'"
                          ).fetchone()["value"]
         assert v == str(db.SCHEMA_VERSION)
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(messages)")]
         assert "reply_to" in cols
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")]
+        assert "model" in cols
     finally:
         conn.close()
 

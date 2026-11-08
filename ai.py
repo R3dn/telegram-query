@@ -75,9 +75,9 @@ def get_client():
     )
 
 
-def _chat(client, system, user):
+def _chat(client, system, user, model=None):
     resp = client.chat.completions.create(
-        model=config.settings.ai_model,
+        model=model or config.settings.ai_model,
         messages=[{"role": "system", "content": system},
                   {"role": "user", "content": user}],
         temperature=config.settings.ai_temperature,
@@ -232,7 +232,8 @@ def ask(conn, question, max_results=None, scope=None):
                     f"Keyword sets already tried: {prev}\n"
                     f"Results found so far: {len(best_rows)}")
 
-        raw = _chat(client, system, user)
+        raw = _chat(client, system, user,
+                    model=config.settings.model_for("extract"))
         spec = _parse_json(raw) or {}
         kws = [k for k in (spec.get("keywords") or []) if k and k.strip()]
         if not kws:
@@ -293,13 +294,15 @@ def ask(conn, question, max_results=None, scope=None):
         )
     else:
         user_msg = f"Today: {today}\n\nQuestion: {question}\n\nMessages:\n{context}"
-    answer = _chat(client, SYSTEM_ANSWER, user_msg)
+    answer = _chat(client, SYSTEM_ANSWER, user_msg,
+                   model=config.settings.model_for("synth"))
     # usage accounting for the ask pipeline (requests; tokens when reported)
     try:
         import ai_tasks
         uconn = db.get_db()
         try:
-            ai_tasks.record_usage(uconn, "ask", attempts + 1, None, None)
+            ai_tasks.record_usage(uconn, "ask", attempts + 1, None, None,
+                                  config.settings.model_for("synth"))
             uconn.commit()
         finally:
             uconn.close()

@@ -70,6 +70,7 @@ export function jobLabel(name: string | null | undefined): string {
       dialogs: "Group listing",
       auth: "Login",
       reindex: "Reindex",
+      discover: "Discovery backfill",
       extract: "Deals extraction",
       brief: "Research brief",
     } as Record<string, string>

@@ -24,6 +24,7 @@ import {
 import { jobLabel } from "../utils/format";
 
 export type FeedMode =
+  | "discover"
   | "browse"
   | "search"
   | "bookmarks"
@@ -32,7 +33,8 @@ export type FeedMode =
   | "watchlists"
   | "alerts"
   | "digests"
-  | "faqs";
+  | "faqs"
+  | "entities";
 export type RightTab = "ai" | "details";
 export type DateChip = "all" | "today" | "7d" | "30d" | "custom";
 
@@ -185,7 +187,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const clearSelection = useCallback(() => setSelection(new Set()), []);
 
   // ---------- filters / mode / search ----------
-  const [mode, setModeState] = useState<FeedMode>("browse");
+  // Discover is the landing view (v0.7): the product's front door is
+  // "what's happening in my communities", with Browse one click away.
+  const [mode, setModeState] = useState<FeedMode>("discover");
   const [q, setQ] = useState("");
   const [filters, setFiltersState] = useState<Filters>(DEFAULT_FILTERS);
   const [dateChip, setDateChipState] = useState<DateChip>("all");

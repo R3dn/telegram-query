@@ -28,7 +28,8 @@ import config
 import db
 
 __all__ = ["TaskError", "run_task", "run_json_task", "fingerprint_rows",
-           "record_usage", "usage_stats", "cache_get", "cache_put"]
+           "record_usage", "usage_stats", "cache_get", "cache_put",
+           "requests_today"]
 
 PROVIDER_ATTEMPTS = 3          # provider-level retries (network/5xx/429)
 BACKOFF_MAX_S = 20.0
@@ -74,10 +75,10 @@ def _get_client():
     return ai.get_client()
 
 
-def _chat_json(client, system, user):
+def _chat_json(client, system, user, model):
     """One provider call returning raw text. Returns (text, usage|None)."""
     resp = client.chat.completions.create(
-        model=config.settings.ai_model,
+        model=model,
         messages=[{"role": "system", "content": system},
                   {"role": "user", "content": user}],
         temperature=config.settings.ai_temperature,
@@ -98,7 +99,7 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def _call_with_retry(system, user):
+def _call_with_retry(system, user, model):
     """Provider call with exponential backoff + jitter. Never fabricates."""
     last_exc = None
     for attempt in range(PROVIDER_ATTEMPTS):
@@ -107,7 +108,7 @@ def _call_with_retry(system, user):
                         + random.uniform(0, 0.3))
             time.sleep(delay)
         try:
-            return _chat_json(_get_client(), system, user)
+            return _chat_json(_get_client(), system, user, model)
         except Exception as e:  # noqa: BLE001 - retried below if transient
             if _is_rate_limit(e) and attempt < PROVIDER_ATTEMPTS - 1:
                 last_exc = e
@@ -184,11 +185,11 @@ def cache_put(conn, task, scope, model, prompt_version, fingerprint, result):
          datetime.now(timezone.utc).isoformat()))
 
 
-def record_usage(conn, task, requests, tokens_in, tokens_out):
+def record_usage(conn, task, requests, tokens_in, tokens_out, model=""):
     conn.execute(
-        "INSERT INTO ai_usage (task, requests, tokens_in, tokens_out, created_at) "
-        "VALUES (?,?,?,?,?)",
-        (task, requests, tokens_in, tokens_out,
+        "INSERT INTO ai_usage (task, requests, tokens_in, tokens_out, model, "
+        "created_at) VALUES (?,?,?,?,?,?)",
+        (task, requests, tokens_in, tokens_out, model,
          datetime.now(timezone.utc).isoformat()))
 
 
@@ -199,30 +200,66 @@ def usage_stats(conn) -> dict:
     total = conn.execute(
         "SELECT COUNT(*) requests, COALESCE(SUM(tokens_in),0) tin, "
         "COALESCE(SUM(tokens_out),0) tout FROM ai_usage").fetchone()
+    models = conn.execute(
+        "SELECT model, COUNT(*) requests FROM ai_usage "
+        "WHERE model != '' GROUP BY model ORDER BY requests DESC").fetchall()
     return {
         "by_task": {r["task"]: {"requests": r["requests"],
                                 "tokens_in": r["tin"],
                                 "tokens_out": r["tout"]} for r in rows},
+        "by_model": {r["model"]: r["requests"] for r in models},
         "total": {"requests": total["requests"],
                   "tokens_in": total["tin"], "tokens_out": total["tout"]},
     }
 
 
 # ---------------------------------------------------------------------------
+# Daily budget guard (v0.7): a hard, deterministic request cap. 0 = off.
+# ---------------------------------------------------------------------------
+
+def requests_today(conn) -> int:
+    start = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+    return conn.execute(
+        "SELECT COALESCE(SUM(requests), 0) r FROM ai_usage WHERE created_at >= ?",
+        (start,)).fetchone()["r"]
+
+
+def _check_daily_cap(conn):
+    """Raise an honest TaskError when the daily AI request cap is reached."""
+    cap = config.settings.ai_daily_cap
+    if cap <= 0:
+        return
+    used = requests_today(conn)
+    if used >= cap:
+        raise TaskError(
+            f"Daily AI request cap reached ({used}/{cap} today, UTC). "
+            "Deterministic features keep working; raise TGQ_AI_DAILY_CAP "
+            "or wait for the cap to reset at 00:00 UTC.")
+
+
+# ---------------------------------------------------------------------------
 # Task runner
 # ---------------------------------------------------------------------------
 
-def run_task(system: str, user: str, task: str) -> str:
-    """Plain text task: provider call + retry + usage recording."""
+def run_task(system: str, user: str, task: str, model_role: str = "synth") -> str:
+    """Plain text task: provider call + retry + usage recording.
+    ``model_role`` ('extract' | 'synth') selects the routed model."""
     if not config.settings.ai_configured:
         raise TaskError("AI is not configured - set AI_API_KEY in Settings.")
-    text, usage = _call_with_retry(system, user)
+    model = config.settings.model_for(model_role)
+    guard = db.get_db()
+    try:
+        _check_daily_cap(guard)
+    finally:
+        guard.close()
+    text, usage = _call_with_retry(system, user, model)
     tin, tout = _tokens_of(usage)
     conn = db.get_db()
     try:
         record_usage(conn, task, 1,
                      tin if tin is not None else _estimate_tokens(system + user),
-                     tout if tout is not None else _estimate_tokens(text))
+                     tout if tout is not None else _estimate_tokens(text),
+                     model)
         conn.commit()
     finally:
         conn.close()
@@ -231,28 +268,39 @@ def run_task(system: str, user: str, task: str) -> str:
 
 def run_json_task(system: str, user: str, task: str,
                   validate, repair_system: str | None = None,
-                  cache: tuple | None = None):
+                  cache: tuple | None = None,
+                  model_role: str = "extract"):
     """Structured task: call -> parse -> validate -> ONE repair -> result or
     TaskError. ``validate`` returns (ok, error_or_None). ``cache`` is an
     optional (conn, task, scope, prompt_version, fingerprint) tuple: a hit
-    skips the provider entirely; a miss stores the validated result."""
+    skips the provider entirely; a miss stores the validated result.
+    ``model_role`` ('extract' | 'synth') selects the routed model - the
+    cheap/fast model for structured extraction, the general model for
+    synthesis tasks."""
     if not config.settings.ai_configured:
         raise TaskError("AI is not configured - set AI_API_KEY in Settings.")
 
-    model = config.settings.ai_model
+    model = config.settings.model_for(model_role)
     conn = cache[0] if cache else None
     own_conn = conn is None
     if cache and conn is not None:
+        _check_daily_cap(conn)
         hit = cache_get(conn, task, cache[2], model, cache[3], cache[4])
         if hit is not None:
             return hit, True   # (result, from_cache)
+    else:
+        guard = db.get_db()
+        try:
+            _check_daily_cap(guard)
+        finally:
+            guard.close()
 
     import ai as ai_module
     requests = 0
     tokens_in = tokens_out = 0
     try:
         for attempt in (1, 2):
-            text, usage = _call_with_retry(system, user)
+            text, usage = _call_with_retry(system, user, model)
             requests += 1
             tin, tout = _tokens_of(usage)
             tokens_in += tin if tin is not None else _estimate_tokens(system + user)
@@ -279,7 +327,7 @@ def run_json_task(system: str, user: str, task: str,
         if requests:
             c2 = db.get_db() if own_conn else conn
             try:
-                record_usage(c2, task, requests, tokens_in, tokens_out)
+                record_usage(c2, task, requests, tokens_in, tokens_out, model)
                 c2.commit()
             finally:
                 if own_conn:

@@ -14,10 +14,16 @@ exactly what stays local and what can leave your machine.
   deleted together with their message
 - **Saved searches, deals, research briefs, digests, FAQ records** — all
   generated and stored locally; exports write to files you download
+- **The entire Discover view (v0.7)** — trending topics, cross-group
+  stories, unanswered questions, group activity, and the entity
+  gazetteer's mention matching are deterministic: computed from your
+  local archive with **zero AI calls**. Entity discovery via AI is
+  opt-in (off by default).
 - **Watchlists and alerts** — pure keyword matching against your local
   archive; this feature never calls an AI provider at all
-- **AI usage records** — request counts and token estimates per feature,
-  kept in your database for the Settings display
+- **AI usage records** — request counts and token estimates per feature
+  (and the model that served them), kept in your database for the
+  Settings display
 - **Group lists, sync state, auto-sync schedule, logs** — local files only
 
 ## What can leave your machine
@@ -42,6 +48,12 @@ Only two channels exist, and both are yours to control:
      scheduled generation; unchanged periods are never re-sent
    - **FAQ answer drafting** — the clustered question variants plus nearby
      answer candidates; only for questions that recur
+    - **Entity discovery** (opt-in, off by default) — batches of new
+      messages above a per-chat watermark, only when you enable it in the
+      Entities view; unchanged batches are served from a local cache
+    - **Topic timelines** (Discover → "Timeline") — retrieved excerpts for
+      one topic, capped and deduplicated; an unchanged topic is served
+      from the local cache
    
    The UI discloses the provider next to each trigger (Ask-AI composer,
    Deals toolbar, digest/deal buttons). Do not configure an AI provider

@@ -17,7 +17,8 @@ import threading
 import time
 
 __all__ = ["JOBS", "JobRunner", "run_sync_job", "fetch_dialogs_job",
-           "run_reindex_job", "POST_SYNC_HOOKS", "DIALOGS_CACHE"]
+           "run_reindex_job", "run_discover_job", "POST_SYNC_HOOKS",
+           "DIALOGS_CACHE"]
 
 # Callables run after every SUCCESSFUL sync job (no args). Registered by
 # features that need incremental work on new messages (v0.6 watchlists,
@@ -43,7 +44,8 @@ class JobRunner:
         sync/dialogs/extract/brief are deduped; front=True jumps ahead of
         other queued jobs."""
         with self.lock:
-            if name in ("sync", "dialogs", "extract", "brief", "digest", "faq"):
+            if name in ("sync", "dialogs", "extract", "brief", "digest", "faq",
+                    "discover"):
                 if (self.running and self.name == name) or \
                         any(n == name for n, _ in self.queue):
                     return False
@@ -220,6 +222,24 @@ def run_faq_job(chat_ids=None, days=90):
     conn = db_get_db()
     try:
         faq.discover(conn, chat_ids=chat_ids, days=days)
+    finally:
+        conn.close()
+
+
+def run_discover_job():
+    """One-time/full discovery backfill (v0.7): term stats, the question
+    radar over the full archive, and the entity gazetteer rebuild.
+    Visible, cancellable, idempotent - clears the needs flag at the end."""
+    import db
+    import discover
+    import entities
+    conn = db_get_db()
+    try:
+        discover.rebuild(conn)
+        entities.rebuild(conn)
+        db.set_setting(conn, "needs_discover_backfill", "0")
+        conn.commit()
+        print("[discover] backfill complete")
     finally:
         conn.close()
 

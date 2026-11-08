@@ -82,6 +82,35 @@ CHAT = [
     "Light roast vs dark roast, the eternal debate returns",
 ]
 
+# v0.7 discovery content (deterministic): the same announcement posted in
+# several groups (cross-group stories), Q&A threads with captured replies,
+# recurring brand mentions (entities), and bilingual Arabic messages.
+ANNOUNCEMENTS = [
+    ("Community meetup this Saturday 7pm at the central park pavilion, "
+     "everyone welcome - bring snacks and drinks for the group"),
+    ("Aurora Coffee is giving free size upgrades all weekend, tell them "
+     "the community sent you for the discount"),
+]
+QA_THREADS = [
+    (-10012340004, "What shutter speed do you use for birds in flight?",
+     "Use 1/2000s with burst mode, works every time for me"),
+    (-10012340008, "Which engine for a 2D platformer in 2026?",
+     "Godot 4 is lighter for small 2D games, Unity if you need console ports"),
+    (-10012340009, "هل يوجد كوبون خصم لمتجر نيمبوس هوستنج؟",
+     "نعم، كود NIMBUS20 يعطيك خصم عشرين بالمئة على أول شهر"),
+]
+ENTITY_BRANDS = [
+    ("Aurora Coffee", "brand"),
+    ("Nimbus Hosting", "brand"),
+    ("GadgetHub", "brand"),
+    ("Trail Mix Co", "brand"),
+]
+ARABIC_CHAT = [
+    "شلون أسعار القهوة هالأسبوع؟ ارتفعت مرة",
+    "هااااي شباب، أحد جرب خدمة توصيل نيمبوس هوستنج الجديدة؟",
+    "توصيل مجاني من متجر أورورا كافيه اليوم فقط، استغلوا العرض",
+]
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Seed a synthetic demo archive")
@@ -118,11 +147,61 @@ def main() -> None:
                               has_media=1 if rng.random() < 0.10 else 0,
                               edited=1 if rng.random() < 0.04 else 0)
             n += 1
+
+    # ---- v0.7 discovery content (ids far above the random block) ----
+    mid = 20000
+    for text in ANNOUNCEMENTS:
+        for chat_id in (-10012340001, -10012340003, -10012340005):
+            db.upsert_message(conn, chat_id, mid, (now - timedelta(days=1)).isoformat(),
+                              70001, "Announcer Bot", text)
+            mid += 1
+    for chat_id, question, answer in QA_THREADS:
+        q_date = (now - timedelta(days=2)).isoformat()
+        db.upsert_message(conn, chat_id, mid, q_date, 70002, "Curious Member", question)
+        db.upsert_message(conn, chat_id, mid + 1,
+                          (now - timedelta(days=2, minutes=-4)).isoformat(),
+                          70003, "Helpful Member", answer, reply_to=mid)
+        mid += 2
+    # one intentionally UNANSWERED question for the radar
+    db.upsert_message(conn, -10012340002, mid,
+                      (now - timedelta(days=1)).isoformat(),
+                      70002, "Curious Member",
+                      "Anyone know if the north ridge lot allows overnight parking?")
+    mid += 1
+    for d in range(0, 25, 2):
+        for gi, (chat_id, _, _, _) in enumerate(GROUPS[:4]):
+            name, _ = ENTITY_BRANDS[(d + gi) % len(ENTITY_BRANDS)]
+            db.upsert_message(conn, chat_id, mid,
+                              (now - timedelta(days=d)).isoformat(),
+                              70010 + gi, rng.choice(SENDERS),
+                              f"{name} update: the community buzz around "
+                              f"{name} keeps growing this month")
+            mid += 1
+    for i, text in enumerate(ARABIC_CHAT):
+        db.upsert_message(conn, (-10012340002, -10012340009, -10012340007)[i % 3],
+                          mid, (now - timedelta(days=1, hours=i)).isoformat(),
+                          70020 + i, "عضو نشيط", text)
+        mid += 1
     conn.commit()
 
     # pretend history is fully synced so no "backfill pending" states show
-    conn.execute(
-        f"UPDATE chats SET last_msg_id={1000 + 999}, backfill_floor=0")
+    for r in conn.execute(
+            "SELECT chat_id, MAX(msg_id) m FROM messages GROUP BY chat_id"
+    ).fetchall():
+        conn.execute("UPDATE chats SET last_msg_id=?, backfill_floor=0 "
+                     "WHERE chat_id=?", (r["m"], r["chat_id"]))
+    conn.commit()
+
+    # build the v0.7 discovery data so Discover/Entities are alive on
+    # first open (deterministic; the app keeps them fresh after each sync)
+    import discover
+    import entities
+    discover.build_terms(conn, full=True, verbose=lambda *_: None)
+    discover.scan_questions(conn, days=3650, verbose=lambda *_: None)
+    for name, kind in ENTITY_BRANDS:
+        entities.add_entity(conn, name, kind=kind, source="manual",
+                            verbose=lambda *_: None)
+    entities.match_and_discover(conn, verbose=lambda *_: None)
     conn.commit()
 
     s = db.stats(conn)

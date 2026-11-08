@@ -9,56 +9,66 @@ session, zero external services.
 │ React SPA   │────▶│  FastAPI  (api/ routers)                     │
 │ (web/dist)  │ /api│  ├─ general.py    app state / health          │
 └────────────┘     │  ├─ auth.py       phone/code/2FA login         │
-                   │  ├─ archive.py    browse / search / message    │
-                   │  ├─ ai.py         ask (with explicit scope)   │
-                   │  ├─ groups.py     track / dialogs              │
-                   │  ├─ jobs.py       sync / stop / status         │
-                   │  ├─ scheduler.py  auto-sync config             │
-                   │  ├─ saved.py      saved searches               │
-                   │  ├─ bookmarks.py  stars + private notes        │
-                   │  ├─ exports.py    Markdown/JSON downloads      │
-                   │  ├─ deals.py      deals workspace              │
-                   │  ├─ research.py   briefs workspace             │
-                   │  ├─ monitor.py    watchlists + alerts inbox    │
-                   │  ├─ digests.py    digests + schedules          │
-                   │  └─ faqs.py       FAQ review workflow           │
-                   │                                              │
-                   │  jobs.py  JobRunner (single-slot queue)       │
-                   │  sync.py  Telethon sync + checkpoints         │
-                   │  auth.py  Telegram login steps               │
-                   │  scheduler.py  auto-sync loop (DB-persisted)  │
-                   │  ai_tasks.py    shared AI task runner         │
-                   │  deals.py / research.py / digests.py / faq.py │
-                   │  watchlists.py  deterministic monitors         │
-                   │  config.py  Settings from env / .env          │
-                   └─────────────────┬─────────────────────────────┘
-                                     │
-                      ┌──────────────┴────────────────┐
-                      │ SQLite (WAL) + FTS5            │
-                      │ data/messages.db  (schema v5)  │
-                      │ data/tg_session.session         │
-                      └─────────────────────────────────┘
+                    │  ├─ archive.py    browse / search / message    │
+                    │  │                 / conversation context     │
+                    │  ├─ ai.py         ask (with explicit scope)   │
+                    │  ├─ groups.py     track / dialogs              │
+                    │  ├─ jobs.py       sync / stop / status         │
+                    │  ├─ scheduler.py  auto-sync config             │
+                    │  ├─ saved.py      saved searches               │
+                    │  ├─ bookmarks.py  stars + private notes        │
+                    │  ├─ exports.py    Markdown/JSON downloads      │
+                    │  ├─ deals.py      deals workspace              │
+                    │  ├─ research.py   briefs workspace             │
+                    │  ├─ monitor.py    watchlists + alerts inbox    │
+                    │  ├─ digests.py    digests + schedules          │
+                    │  ├─ faqs.py       FAQ review workflow           │
+                    │  └─ discover.py   trending / stories / activity│
+                    │                   questions / entities /        │
+                    │                   topic timeline               │
+                    │                                              │
+                    │  jobs.py  JobRunner (single-slot queue)       │
+                    │  sync.py  Telethon sync + checkpoints         │
+                    │  auth.py  Telegram login steps               │
+                    │  scheduler.py  auto-sync loop (DB-persisted)  │
+                    │  ai_tasks.py    shared AI task runner         │
+                    │                 (routing: extract|synth|embed)│
+                    │  deals.py / research.py / digests.py / faq.py │
+                    │  watchlists.py  deterministic monitors         │
+                    │  discover.py    term analytics / stories /     │
+                    │                 questions / timeline          │
+                    │  entities.py    gazetteer + mention matching  │
+                    │  config.py  Settings from env / .env          │
+                    └─────────────────┬─────────────────────────────┘
+                                      │
+                       ┌──────────────┴────────────────┐
+                       │ SQLite (WAL) + FTS5            │
+                       │ data/messages.db  (schema v6)  │
+                       │ data/tg_session.session         │
+                       └─────────────────────────────────┘
 ```
 
 ## Modules
 
 | File | Role |
 |---|---|
-| `config.py` | Single `Settings` object; env parsing, aliases, path resolution, normalization level |
-| `app.py` | Thin entry: routers, static serving, startup threads, post-sync + tick hook registration |
+| `config.py` | Single `Settings` object; env parsing, aliases, path resolution, normalization level, model routing (`AI_MODEL_EXTRACT/SYNTH/EMBED` with `AI_MODEL` fallback), daily AI cap |
+| `app.py` | Thin entry: routers, static serving, startup threads, post-sync + tick hook registration, upgrade backfill jobs (reindex, discovery) |
 | `api/` | HTTP routers grouped by domain; each opens its own DB connection |
-| `db.py` | Schema + versioned migrations (v5), upserts with **incremental FTS upkeep**, keyset-paginated browse, search (star/min-id filters), normalization, settings KV, verified `t.me` link builder |
+| `db.py` | Schema + versioned migrations (v6), upserts with **incremental FTS upkeep**, keyset-paginated browse, search (star/min-id filters), normalization, settings KV, verified `t.me` link builder, conversation reconstruction |
 | `sync.py` | Telethon CLI/web sync; checkpointed resumable backfills; `reply_to` capture; `CANCEL` event honored between messages |
 | `auth.py` | Login steps (phone → code → 2FA); pending state kept in memory only |
-| `jobs.py` | JobRunner: jobs run **one at a time** (the Telegram session must not be used concurrently); queue with dedupe + priority; stdout captured for the live log; `POST_SYNC_HOOKS` + `TICK_HOOKS` seams; reindex/extract/brief/digest/faq jobs |
+| `jobs.py` | JobRunner: jobs run **one at a time** (the Telegram session must not be used concurrently); queue with dedupe + priority; stdout captured for the live log; `POST_SYNC_HOOKS` + `TICK_HOOKS` seams; reindex/extract/brief/digest/faq/discover jobs |
 | `scheduler.py` | Auto-sync: DB-persisted schedule (`app_settings`), 30s loop, catch-up after downtime, never overlaps a running sync |
-| `ai.py` | Ask-AI: extract keywords → FTS → (retry) → grounded answer; explicit scope chips override model guesses |
-| `ai_tasks.py` | Shared AI task layer: fence-tolerant parsing, schema validation with ONE repair attempt, provider retries with backoff+jitter, fingerprint result cache, per-task usage recording, versioned prompts, shared citation validation |
-| `deals.py` | Deals pipeline: bilingual keyword net → batched schema-constrained extraction → strict identity merge (sources preserved) → evidence-derived status; per-chat watermark for incremental runs |
-| `research.py` | Briefs: keyword retrieval + reply/neighbor context expansion → cited brief → versioned saves; deterministic staleness |
+| `ai.py` | Ask-AI: extract keywords (extract model) → FTS → (retry) → grounded answer (synth model); explicit scope chips override model guesses |
+| `ai_tasks.py` | Shared AI task layer: model routing per task type, fence-tolerant parsing, schema validation with ONE repair attempt, provider retries with backoff+jitter, per-fingerprint result cache, per-task usage recording **with the model that served it**, daily request cap, versioned prompts, shared citation validation |
+| `deals.py` | Deals pipeline: bilingual keyword net → batched schema-constrained extraction (extract model) → strict identity merge (sources preserved) → evidence-derived status; per-chat watermark for incremental runs |
+| `research.py` | Briefs: keyword retrieval + reply/neighbor context expansion → cited brief (synth model) → versioned saves; deterministic staleness |
 | `watchlists.py` | Deterministic keyword monitors over each sync's new messages; **never calls the AI** |
-| `digests.py` | Period digests with deterministic theme hints; schedule due-check + fingerprint reuse |
-| `faq.py` | Question detection + conservative clustering; drafted answers stay `candidate` until a human approves |
+| `digests.py` | Period digests with deterministic theme hints; schedule due-check + fingerprint reuse (synth model) |
+| `faq.py` | Question detection (shared with the radar) + conservative clustering; drafted answers stay `candidate` until a human approves |
+| `discover.py` | v0.7 discovery engine: incremental daily term counts (`term_daily`), deterministic burst-scored trending, cross-group story clustering, group activity aggregates (never per-member), unanswered-questions radar (watermark-incremental, auto-resolving, human-gated), and the AI topic timeline (synth model, citation-validated, cached) |
+| `entities.py` | v0.7 entity gazetteer: deterministic seeds (deal vendors) + manual adds + opt-in LLM discovery (extract model, cached); deterministic mention matching over `text_norm`; never individual people |
 | `web/` | React + TypeScript source (Vite); production build committed to `web/dist/` |
 
 ## Key decisions
@@ -84,6 +94,14 @@ fingerprint, and every stored output records its prompt version + model.
 Citations (`[n]`) are validated on the backend against the real retrieved
 set; unresolvable markers are stripped and reported.
 
+**Model routing (v0.7).** `AI_MODEL_EXTRACT` serves cheap structured
+tasks (deals, entities, keyword extraction), `AI_MODEL_SYNTH` serves
+answers/briefs/digests/FAQ answers/timelines, `AI_MODEL_EMBED` is
+reserved for the benchmark-gated hybrid retrieval. Every role falls
+back to `AI_MODEL` — routing is optional, provider-agnostic, and a
+`TGQ_AI_DAILY_CAP` guards the daily budget with honest errors while
+deterministic features keep working.
+
 **Search normalization.** `normalize_text` (level `extended`, default)
 lowercases, strips Arabic diacritics/tatweel, unifies alef/ya/taa-marbuta
 variants, folds Arabic-Indic digits, collapses chat elongation, folds
@@ -92,16 +110,23 @@ and maps common Gulf dialect words to standard forms — at index AND
 query time, so both sides always match. `standard` reproduces v0.3
 exactly. Original message text is never modified.
 
-**Deterministic-first monitoring.** Watchlists match normalized keywords
-above a per-chat watermark with zero AI involvement; alerts dedupe per
-watchlist+message (UNIQUE). Deals incremental extraction and digest
-schedule checks ride the same seams (`POST_SYNC_HOOKS`, `TICK_HOOKS`) so
-nothing scans the whole archive per run.
+**Deterministic-first monitoring and discovery.** Watchlists match
+normalized keywords above a per-chat watermark with zero AI involvement.
+Discovery (v0.7) follows the same doctrine: term stats, trending burst
+scoring, stories, activity, and the question radar are pure
+SQL/Python over stored `text_norm` and cost nothing; the only AI
+surfaces are the opt-in entity gazetteer growth and the cited topic
+timeline, both fingerprint-cached. All incremental work rides
+`POST_SYNC_HOOKS`/`TICK_HOOKS` — nothing scans the whole archive per
+run. Entity tracking covers brands/products/orgs/places/events and
+**never individual people** — no member analytics exists in this
+product.
 
 **Human gates.** FAQ answers are `candidate` until approved; new evidence
 flags an approved answer for review instead of silently replacing it.
 Extracted deals carry evidence-derived status (`active` without validity
 evidence reads `unverified`) with confirm/dismiss/correct controls.
+Question statuses are human-controlled and never overwritten by rescans.
 
 **Local-only posture.** No auth in-app; the default bind is `127.0.0.1`.
 The docs and UI disclose exactly what leaves the machine (retrieved

@@ -8,19 +8,28 @@ import type {
   AuthState,
   Brief,
   BookmarkRow,
+  ConversationContext,
   Deal,
   DealsSettings,
   Digest,
   DigestSchedule,
   Dialog,
+  EntitiesSettings,
+  Entity,
+  EntityDetail,
   Faq,
   FeedPage,
   Group,
   JobStatus,
   Message,
+  OpenQuestion,
   SavedSearch,
   SchedulerState,
   Sender,
+  Story,
+  TimelineResult,
+  TrendingTopic,
+  ActivityReport,
   Watchlist,
 } from "./types";
 
@@ -287,4 +296,61 @@ export const api = {
   jobStatus: () => req<JobStatus>("/api/job/status"),
   jobStop: (clearQueue = false) =>
     post<{ stopping: boolean; cleared: string[] }>("/api/job/stop", { clear_queue: clearQueue }),
+
+  // discovery (v0.7)
+  discoverTrending: (p: { days: number; groups: number[]; sort?: string; minVolume?: number }) => {
+    const q = new URLSearchParams({ days: String(p.days) });
+    if (p.groups.length) q.set("groups", p.groups.join(","));
+    if (p.sort) q.set("sort", p.sort);
+    if (p.minVolume) q.set("min_volume", String(p.minVolume));
+    return req<TrendingTopic[]>(`/api/discover/trending?${q}`);
+  },
+  discoverStories: (p: { days: number; groups: number[] }) => {
+    const q = new URLSearchParams({ days: String(p.days) });
+    if (p.groups.length) q.set("groups", p.groups.join(","));
+    return req<Story[]>(`/api/discover/stories?${q}`);
+  },
+  discoverActivity: (p: { days: number; groups: number[] }) => {
+    const q = new URLSearchParams({ days: String(p.days) });
+    if (p.groups.length) q.set("groups", p.groups.join(","));
+    return req<ActivityReport>(`/api/discover/activity?${q}`);
+  },
+  discoverQuestions: (p: { status: string; groups: number[] }) => {
+    const q = new URLSearchParams({ status: p.status });
+    if (p.groups.length) q.set("groups", p.groups.join(","));
+    return req<OpenQuestion[]>(`/api/discover/questions?${q}`);
+  },
+  questionSetStatus: (chatId: number, msgId: number, status: string) =>
+    post<{ ok: boolean; status: string }>(
+      `/api/discover/questions/${chatId}/${msgId}`, { status }),
+  questionScan: (days: number) =>
+    post<{ ok: boolean; new_open: number; open: number }>(
+      "/api/discover/questions/scan", { days }),
+  discoverRebuild: () => post<{ started: boolean }>("/api/discover/rebuild"),
+  topicTimeline: (p: { term: string; chat_ids: number[]; days: number }) =>
+    post<TimelineResult>("/api/discover/topic-timeline", p),
+  entitiesList: (p?: { q?: string; sort?: string; groups?: number[] }) => {
+    const q = new URLSearchParams();
+    if (p?.q) q.set("q", p.q);
+    if (p?.sort) q.set("sort", p.sort);
+    if (p?.groups?.length) q.set("groups", p.groups.join(","));
+    return req<Entity[]>(`/api/discover/entities${q.size ? `?${q}` : ""}`);
+  },
+  entitiesSettings: () => req<EntitiesSettings>("/api/discover/entities/settings"),
+  entitiesAuto: (enabled: boolean) =>
+    post<{ auto: boolean }>("/api/discover/entities/auto", { enabled }),
+  entityGet: (id: number, mentionsLimit = 30, mentionsOffset = 0) =>
+    req<EntityDetail>(
+      `/api/discover/entities/${id}?mentions_limit=${mentionsLimit}&mentions_offset=${mentionsOffset}`),
+  entityCreate: (p: { name: string; kind: string; aliases: string[] }) =>
+    post<Entity>("/api/discover/entities", p),
+  entityPatch: (id: number, p: Record<string, unknown>) =>
+    patch<Entity>(`/api/discover/entities/${id}`, p),
+  entityMerge: (sourceId: number, targetId: number) =>
+    post<EntityDetail>("/api/discover/entities/merge",
+      { source_id: sourceId, target_id: targetId }),
+  entityDelete: (id: number) =>
+    req<{ ok: boolean }>(`/api/discover/entities/${id}`, { method: "DELETE" }),
+  messageContext: (chatId: number, msgId: number) =>
+    req<ConversationContext>(`/api/message/${chatId}/${msgId}/context`),
 };

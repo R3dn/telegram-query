@@ -1,9 +1,11 @@
 /** Right panel "Details" tab: full message, metadata, private note,
- *  bookmark star, and Telegram deep links (v0.4). */
+ *  bookmark star, conversation reconstruction (v0.7), and Telegram
+ *  deep links (v0.4). */
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
 import { fmtDateTime } from "../utils/format";
+import { ConversationBlock } from "./ConversationBlock";
 
 export function DetailsPanel() {
   const { selected, setFilters, loadFeed, toast, senders, select } = useStore();
@@ -110,6 +112,10 @@ export function DetailsPanel() {
         )}
         {m.edited === 1 && <div className="meta-row"><span>Edited</span><b>yes</b></div>}
         {m.has_media === 1 && <div className="meta-row"><span>Media</span><b>image (not stored locally)</b></div>}
+      </div>
+
+      <div className="detail-note">
+        <ConversationBlock m={m} />
       </div>
 
       <div className="detail-note">

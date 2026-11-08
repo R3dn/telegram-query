@@ -237,6 +237,7 @@ def generate(conn, brief_id, verbose=print):
         user,
         task="research-brief",
         validate=_validate_brief,
+        model_role="synth",
         cache=(conn, "research-brief", ai_tasks.scope_hash(
             "research-brief", {"q": brief["question"], "n": len(rows)}),
             PROMPT_VERSION, ai_tasks.fingerprint_rows(rows)))

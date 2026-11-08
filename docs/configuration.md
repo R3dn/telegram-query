@@ -41,19 +41,24 @@ Any OpenAI-compatible chat-completions endpoint works: OpenAI, Azure,
 Groq, Together, OpenRouter, Ollama (`http://localhost:11434/v1`), LM
 Studio, vLLM, and compatible local servers.
 
-Ask-AI, deal extraction, research briefs, digests, and FAQ answer
-drafting all use this one provider. Each AI feature can be disabled
-independently in the UI; without `AI_API_KEY` they all show clear
-"not configured" states while search, browsing, sync, watchlists, and
-alerts keep working (watchlists never use AI at all).
+Ask-AI, deal extraction, research briefs, digests, FAQ answer
+drafting, and the (optional) topic timeline all use this one provider.
+Each AI feature can be disabled independently in the UI; without
+`AI_API_KEY` they all show clear "not configured" states while search,
+browsing, sync, watchlists, alerts, and the entire Discover view keep
+working (discovery and watchlists never use AI at all).
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `AI_BASE_URL` | OpenAI | Base URL of the endpoint |
 | `AI_API_KEY` | — | Key; AI features stay disabled until set |
 | `AI_MODEL` | `gpt-4o-mini` | Model name as the endpoint expects it |
+| `AI_MODEL_EXTRACT` | falls back to `AI_MODEL` | Cheap/fast model for structured tasks (deal extraction, entity discovery, keyword extraction) |
+| `AI_MODEL_SYNTH` | falls back to `AI_MODEL` | Model for answers, briefs, digests, FAQ answers, topic timelines |
+| `AI_MODEL_EMBED` | falls back to `AI_MODEL` | Reserved for the benchmark-gated hybrid retrieval (v0.8) |
 | `AI_TEMPERATURE` | `0.2` | Generation temperature |
 | `AI_MAX_SOURCES` | `80` | Max messages sent as context per question |
+| `TGQ_AI_DAILY_CAP` | `0` (off) | Max AI requests per UTC day — AI features fail with honest errors at the cap; deterministic features are never affected |
 | `TGQ_GROUPS_HINT` | — | Free-text description of your communities, injected into the keyword extractor to sharpen retrieval (e.g. "local restaurant deal groups in Riyadh") |
 
 ## Search normalization (v0.4)

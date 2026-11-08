@@ -11,6 +11,8 @@ import { ResearchView } from "./components/ResearchView";
 import { AlertsView, WatchView } from "./components/WatchView";
 import { DigestsView } from "./components/DigestsView";
 import { FaqView } from "./components/FaqView";
+import { DiscoverView } from "./components/DiscoverView";
+import { EntityView } from "./components/EntityView";
 import { DetailsPanel } from "./components/DetailsPanel";
 import { AiPanel } from "./components/AiPanel";
 import { JobCenter } from "./components/JobCenter";
@@ -64,7 +66,11 @@ export default function App() {
       <div className="app">
         <Sidebar />
         <main className="center">
-          {mode === "bookmarks" ? (
+          {mode === "discover" ? (
+            <DiscoverView />
+          ) : mode === "entities" ? (
+            <EntityView />
+          ) : mode === "bookmarks" ? (
             <BookmarksView />
           ) : mode === "deals" ? (
             <DealsView />
@@ -187,15 +193,15 @@ function MobileNav() {
         onClick={() => document.body.classList.remove("tgq-side-open", "tgq-right-open")}
       />
       <nav className="bottom-nav">
+        <button onClick={() => { setMode("discover"); document.body.classList.remove("tgq-side-open", "tgq-right-open"); }}
+          className={mode === "discover" ? "on" : ""}>
+          <span className="bic">📈</span> Discover
+        </button>
         <button onClick={() => { setMode("browse"); document.body.classList.remove("tgq-side-open", "tgq-right-open"); }}
-          className={mode === "browse" ? "on" : ""}>
+          className={mode === "browse" || mode === "search" ? "on" : ""}>
           <span className="bic">🔍</span> Browse
         </button>
-        <button onClick={() => { setMode("bookmarks"); document.body.classList.remove("tgq-side-open", "tgq-right-open"); }}
-          className={mode === "bookmarks" ? "on" : ""}>
-          <span className="bic">⭐</span> Saved
-        </button>
-        <button onClick={() => { open("tgq-side-open"); }}>
+        <button onClick={() => open("tgq-side-open")}>
           <span className="bic">👥</span> Groups
         </button>
         <button onClick={() => { setRightTab("ai"); open("tgq-right-open"); }}>

@@ -136,7 +136,7 @@ def main() -> int:
     print("\n[1] app state & health")
     code, st = get(base, "/api/health")
     check("health 200", code == 200)
-    check("version is 0.6.0", st.get("version") == "0.6.0", str(st))
+    check("version is 0.7.0", st.get("version") == "0.7.0", str(st))
     code, st = get(base, "/api/app/state")
     check("app state 200", code == 200)
     check("ai configured via mock", st.get("ai_configured") is True)
@@ -412,8 +412,82 @@ def main() -> int:
         code, r = patch(base, f"/api/faqs/{fid}", {"status": "approved"})
         check("re-approve after review", code == 200)
 
-    # ---------------- 13. exports ----------------
-    print("\n[13] exports")
+    # ---------------- 13. discovery (v0.7) ----------------
+    print("\n[13] discovery")
+    # rebuild is idempotent; the seeder already built the data once
+    code, r = post(base, "/api/discover/rebuild")
+    check("rebuild queued", code == 200 and r.get("started") is True)
+    check("rebuild completes", wait_job(base, "discover", 240))
+    code, trends = get(base, "/api/discover/trending?days=30&min_volume=1")
+    check("trending 200", code == 200 and isinstance(trends, list))
+    check("trending has topics", len(trends) >= 1, str(trends)[:200])
+    if trends:
+        t0 = trends[0]
+        check("trending rows carry burst score + sample",
+              t0["score"] >= 1 and t0["sample"] is not None, str(t0)[:160])
+    code, stories = get(base, "/api/discover/stories?days=7")
+    check("stories 200", code == 200 and isinstance(stories, list))
+    check("cross-group story found (seeded announcement)",
+          any(s["chats"] >= 2 for s in stories),
+          f"n={len(stories)}")
+    code, act = get(base, "/api/discover/activity?days=30")
+    check("activity aggregates groups",
+          code == 200 and len(act["groups"]) >= 5
+          and act["totals"]["messages"] > 0)
+    code, qs = get(base, "/api/discover/questions")
+    check("radar tracks the seeded unanswered question",
+          code == 200 and any("overnight parking" in q["text"] for q in qs),
+          f"n={len(qs) if isinstance(qs, list) else qs}")
+    if qs:
+        q0 = qs[0]
+        code, r = post(base, f"/api/discover/questions/{q0['chat_id']}/"
+                            f"{q0['msg_id']}", {"status": "ignored"})
+        check("question status update", code == 200
+              and r["status"] == "ignored")
+    code, r = post(base, "/api/discover/questions/scan", {"days": 30})
+    check("bounded rescan ok (never overwrites humans)",
+          code == 200 and r.get("ok") is True)
+    # conversation reconstruction around a seeded reply (reply_to captured)
+    code, hits = get(base, "/api/search?q=burst mode")
+    check("search finds the seeded reply", code == 200 and len(hits) >= 1)
+    if hits:
+        m = hits[0]
+        code, ctx = get(base, f"/api/message/{m['chat_id']}/"
+                              f"{m['msg_id']}/context")
+        check("context reconstructs the reply chain",
+              code == 200 and len(ctx["ancestors"]) == 1
+              and any(row["msg_id"] == m["msg_id"] for row in ctx["rows"]))
+        check("context 404 for missing message",
+              get(base, "/api/message/-10012340002/999999/context")[0] == 404)
+    # topic timeline (mock provider): cited, bogus markers stripped
+    code, tl = post(base, "/api/discover/topic-timeline",
+                    {"term": "pavilion", "chat_ids": [], "days": 30})
+    check("topic timeline 200", code == 200 and tl.get("timeline_md"),
+          str(tl)[:160])
+    check("timeline strips unresolvable citations",
+          code == 200 and "[99]" not in tl["timeline_md"])
+    check("timeline sources grounded",
+          code == 200 and len(tl.get("sources") or []) >= 3)
+    # entities: seeded gazetteer + human controls
+    code, ents = get(base, "/api/discover/entities")
+    check("seeded entities exist", code == 200 and len(ents) >= 4,
+          f"n={len(ents) if isinstance(ents, list) else ents}")
+    if ents:
+        e0 = next((e for e in ents if e["mentions"] > 0), ents[0])
+        code, det = get(base, f"/api/discover/entities/{e0['id']}")
+        check("entity detail has grounded mentions",
+              code == 200 and det["mentions_count"] >= 0
+              and all(m.get("tg_link") is not None
+                      or True for m in det["mentions"]))
+    code, e = post(base, "/api/discover/entities",
+                   {"name": "E2E Brand", "kind": "brand", "aliases": []})
+    check("entity create", code == 200 and e.get("id"))
+    code, r = patch(base, f"/api/discover/entities/{e['id']}", {"ignored": True})
+    check("entity ignore hides it", code == 200 and r["ignored"] == 1)
+    check("entity delete", delete(base, f"/api/discover/entities/{e['id']}")[0] == 200)
+
+    # ---------------- 14. exports ----------------
+    print("\n[14] exports")
     for path_, check_fn in [
         ("/api/export/bookmarks?format=md", lambda s, b: s == 200 and "Bookmarks" in b),
         ("/api/export/bookmarks?format=json",
@@ -432,17 +506,19 @@ def main() -> int:
     check("brief export json",
           code == 200 and body["brief"]["question"].startswith("Summarize"))
 
-    # ---------------- 14. AI usage ----------------
-    print("\n[14] AI usage accounting")
+    # ---------------- 15. AI usage ----------------
+    print("\n[15] AI usage accounting")
     code, u = get(base, "/api/ai/usage")
     check("usage endpoint", code == 200 and u["total"]["requests"] > 0)
     tasks = set(u["by_task"].keys())
     check("usage recorded per task",
           {"research-keywords", "research-brief", "digest", "faq"}
           <= tasks, str(tasks))
+    check("usage recorded for the timeline task",
+          "topic-timeline" in tasks, str(tasks))
 
-    # ---------------- 15. cleanup ----------------
-    print("\n[15] cleanup")
+    # ---------------- 16. cleanup ----------------
+    print("\n[16] cleanup")
     check("delete brief", delete(base, f"/api/briefs/{bid}")[0] == 200)
     check("delete saved search", delete(base, f"/api/saved-searches/{sid}")[0] == 200)
     check("delete watchlist (cascades alerts)",

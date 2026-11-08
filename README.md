@@ -20,6 +20,13 @@ Telegram session never leave it.
 
 - **Local-first & private** — SQLite archive on your disk; no cloud, no
   telemetry. The server binds to `127.0.0.1` by default.
+- **Community discovery (new)** — the app opens on a **Discover** view:
+  trending topics (deterministic burst scoring over a bilingual term
+  index), the same post forwarded across your groups, unanswered
+  questions, entity tracking (brands/products/places — never people),
+  and group activity — every card jumps to the original messages.
+  Works with **zero AI configuration**; an optional per-topic "timeline"
+  adds cited AI synthesis.
 - **Full-history sync + auto-sync** — checkpointed backfills that
   pause/resume without losing progress, incremental updates, edit
   detection, flood-limit handling, a job queue with stop/cancel controls,
@@ -135,6 +142,10 @@ automatically). Full reference: [docs/configuration.md](docs/configuration.md).
 | `AI_BASE_URL` | OpenAI | Any OpenAI-compatible endpoint |
 | `AI_API_KEY` | — | Enables Ask-AI when set |
 | `AI_MODEL` | `gpt-4o-mini` | Model name |
+| `AI_MODEL_EXTRACT` | falls back to `AI_MODEL` | Cheap/fast model for structured extraction (deals, entities, keywords) |
+| `AI_MODEL_SYNTH` | falls back to `AI_MODEL` | Model for answers, briefs, digests, timelines |
+| `AI_MODEL_EMBED` | falls back to `AI_MODEL` | Reserved for the (benchmark-gated) hybrid retrieval |
+| `TGQ_AI_DAILY_CAP` | `0` (off) | Max AI requests per UTC day — honest errors when reached, deterministic features unaffected |
 | `TGQ_GROUPS_HINT` | — | Optional community description to sharpen keyword extraction |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | Local bind address — keep it local |
 
@@ -177,19 +188,28 @@ Automated suites cover the DB/migrations, bilingual + Gulf/Arabizi search
 normalization, sync checkpoints and resume, the job queue, the auto-sync
 scheduler, the AI pipeline and scope (with a mocked provider - no real
 credentials needed), setup/auth flows, saved searches, bookmarks and
-notes, deep links, exports, and the citation mapping in the frontend.
-Contributions welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
+notes, deep links, exports, the citation mapping in the frontend,
+discovery (terms/stories/questions/entities/conversation), model
+routing, and the daily budget cap. Contributions welcome - see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Known limitations
 
-- Media is archived as a marker (`[image]`), not downloaded.
-- One Telegram account per installation (single session file).
+- Media is archived as a marker (`[image]`), not downloaded. An opt-in
+  media cache is planned for a later release; OCR is gated on it.
+- One Telegram account per installation (single session file). A second
+  installation via `TG_DATA_DIR` is the supported pattern (see
+  `docs/decisions/`).
 - No multi-user auth: the UI assumes the person at localhost is you.
 - Search indexes message *text*; OCR of image content is out of scope.
 - Messages deleted on Telegram remain in your archive (the archive is a
   historical record; untrack & delete removes them locally).
 - Jobs that are queued but not yet started don't survive an app restart;
-  running jobs checkpoint and resume on the next sync.
+  running jobs checkpoint and resume on the next sync (persistent queue
+  is planned for v0.10).
+- Discovery term stats and the question radar update after each sync;
+  `reply_to` threading data is captured going forward (v0.5+), so older
+  messages rely on the time-window fallback in conversation view.
 
 ## License
 

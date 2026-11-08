@@ -277,6 +277,134 @@ export interface AskResult {
   scope?: AskScope;
 }
 
+// ---- v0.7: discovery ----------------------------------------------------
+
+export interface TrendingTopic {
+  term: string;
+  recent: number;
+  baseline: number;
+  score: number;
+  chats: number;
+  sample: {
+    chat_id: number; msg_id: number; date: string;
+    chat_title: string; text: string;
+  } | null;
+}
+
+export interface StoryOccurrence {
+  chat_id: number;
+  msg_id: number;
+  date: string;
+  text: string;
+  sender_name: string | null;
+  chat_title: string;
+  tg_link: string | null;
+}
+
+export interface Story {
+  key: string;
+  n: number;
+  chats: number;
+  first_date: string;
+  last_date: string;
+  sample_text: string;
+  chat_titles: string[];
+  occurrences: StoryOccurrence[];
+}
+
+export interface GroupActivity {
+  chat_id: number;
+  title: string;
+  kind: string;
+  daily: { day: string; n: number }[];
+  total: number;
+  media: number;
+  per_day: number;
+  media_share: number;
+}
+
+export interface ActivityReport {
+  days: number;
+  groups: GroupActivity[];
+  hours: { hour: number; n: number }[];
+  totals: { messages: number; active_groups: number; messages_per_day: number };
+}
+
+export interface OpenQuestion {
+  chat_id: number;
+  msg_id: number;
+  text: string;
+  asked_at: string;
+  replies: number;
+  followers: number;
+  status: "open" | "answered" | "ignored";
+  answered_by: number | null;
+  updated_at: string;
+  chat_title: string;
+  tg_link: string | null;
+  faq: { id: number; question: string; answer_md: string | null } | null;
+}
+
+export interface Entity {
+  id: number;
+  name: string;
+  norm_name: string;
+  kind: string;
+  aliases: string[];
+  source: string;
+  ignored: number;
+  created_at: string;
+  updated_at: string;
+  mentions: number;
+  recent: number;
+  last_seen: string | null;
+}
+
+export interface EntityMention {
+  chat_id: number;
+  msg_id: number;
+  date: string;
+  text: string;
+  sender_name: string | null;
+  chat_title: string;
+  tg_link: string | null;
+}
+
+export interface EntityDetail extends Omit<Entity, "mentions"> {
+  groups: { chat_id: number; title: string; n: number }[];
+  daily: { day: string; n: number }[];
+  mentions: EntityMention[];
+  mentions_count: number;
+  merged?: { source: string; mentions_moved: number };
+}
+
+export interface EntitiesSettings {
+  auto: boolean;
+  ai_configured: boolean;
+}
+
+export interface TimelineResult {
+  term: string;
+  timeline_md: string;
+  sources: {
+    chat_id: number; msg_id: number; date: string;
+    sender_name: string | null; text: string;
+    chat_title: string; tg_link: string | null;
+  }[];
+}
+
+export interface ConversationRow extends Message {
+  is_target: number;
+  is_reply: number;
+}
+
+export interface ConversationContext {
+  target: Message;
+  ancestors: Message[];
+  replies: Message[];
+  rows: ConversationRow[];
+}
+
 export interface AuthState {
   authenticated: boolean | null;
   user: string | null;
