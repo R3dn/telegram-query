@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError
+from telethon.errors import ChatIdInvalidError, FloodWaitError
 from telethon.tl.types import Channel, Chat, User
 
 import config
@@ -140,8 +140,24 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
     History backfills are checkpointed (chats.backfill_floor) so they can be
     stopped and resumed without losing progress.
     Default (days=None) = plain incremental sync (+ backfill resume if paused).
+    A chat that cannot be resolved (deleted, migrated to a supergroup, this
+    account left/was kicked) is skipped with a log line naming it - one
+    dead group must not abort the whole sync job.
     """
-    chat = await client.get_entity(chat_id)
+    try:
+        chat = await client.get_entity(chat_id)
+    except Exception as e:
+        row = conn.execute("SELECT title FROM chats WHERE chat_id=?",
+                           (chat_id,)).fetchone()
+        title = row["title"] if row else str(chat_id)
+        if isinstance(e, ChatIdInvalidError):
+            print(f"[{title}] skipped - chat ID is invalid "
+                  f"(deleted, migrated to a supergroup, or you left it)")
+            print(f"  untrack it to stop syncs from retrying: "
+                  f"python sync.py --untrack {chat_id}")
+        else:
+            print(f"[{title}] skipped - could not resolve the chat ({e})")
+        return
     title = getattr(chat, "title", "") or str(chat_id)
     if isinstance(chat, User):
         kind = "user"

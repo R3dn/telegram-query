@@ -3,6 +3,16 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- A tracked chat that Telegram can no longer resolve (deleted, migrated to
+  a supergroup, account left/kicked) no longer aborts the whole sync job.
+  The sync now logs that chat's title with an untrack hint
+  (`python sync.py --untrack <id>`) and continues with the remaining
+  chats; previously one dead group killed the entire run and every chat
+  after it went unsynced until it was removed.
+
 ## [0.7.0] - 2026-11-08
 
 Community Discovery: understand what's happening across your communities

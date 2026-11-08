@@ -5,6 +5,8 @@ No network, no Telegram - just the orchestration logic against a temp DB.
 import asyncio
 from datetime import datetime, timezone
 
+from telethon.errors import ChatIdInvalidError
+
 import db
 import sync
 
@@ -155,3 +157,68 @@ def test_cancel_event_stops_iteration(conn):
     run(consume())
     assert got == [], "a pre-set cancel must stop iteration before any yield"
     sync.CANCEL.clear()
+
+
+def test_dead_chat_is_skipped_not_fatal(conn, capsys):
+    """A chat Telegram can no longer resolve (deleted, migrated to a
+    supergroup, account left/kicked) is skipped with the chat's title and
+    an untrack hint - one dead group must not abort the whole sync job."""
+    db.upsert_chat(conn, -200, "Dead Group", "dead", "group")
+
+    class DeadClient(FakeClient):
+        async def get_entity(self, cid):
+            raise ChatIdInvalidError(request=None)
+
+    sync.CANCEL.clear()
+    run(sync.sync_chat(DeadClient(), conn, -200))  # must not raise
+
+    out = capsys.readouterr().out
+    assert "[Dead Group]" in out, "the skip line must name the chat"
+    assert "skipped - chat ID is invalid" in out
+    assert "python sync.py --untrack -200" in out
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM messages WHERE chat_id=-200"
+    ).fetchone()["c"] == 0, "nothing is stored for a dead chat"
+
+
+def test_transient_resolution_error_is_skipped(conn, capsys):
+    """Any other get_entity failure (e.g. a network error) skips that one
+    chat with the raw error - the job keeps going."""
+    db.upsert_chat(conn, -300, "Flaky Group", "flaky", "group")
+
+    class FlakyClient(FakeClient):
+        async def get_entity(self, cid):
+            raise ValueError("connection reset mid-handshake")
+
+    sync.CANCEL.clear()
+    run(sync.sync_chat(FlakyClient(), conn, -300))  # must not raise
+
+    out = capsys.readouterr().out
+    assert "[Flaky Group] skipped - could not resolve the chat" in out
+    assert "connection reset mid-handshake" in out
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM messages WHERE chat_id=-300"
+    ).fetchone()["c"] == 0
+
+
+def test_alive_chat_still_syncs_after_a_dead_one(conn, capsys):
+    """The run() loop calls sync_chat per tracked chat; after the skip
+    change the dead chat returns and the next chat syncs normally."""
+    db.upsert_chat(conn, -400, "Zombie Group", "zombie", "group")
+    db.upsert_chat(conn, -401, "Alive Group", "alive", "group")
+
+    class MixedClient(FakeClient):
+        async def get_entity(self, cid):
+            if cid == -400:
+                raise ChatIdInvalidError(request=None)
+            return FakeChat(cid)
+
+    sync.CANCEL.clear()
+    run(sync.sync_chat(MixedClient(), conn, -400))  # skipped, no raise
+    run(sync.sync_chat(MixedClient(), conn, -401))  # still works
+
+    out = capsys.readouterr().out
+    assert "[Zombie Group] skipped" in out
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM messages WHERE chat_id=-401"
+    ).fetchone()["c"] == 1200, "the live chat fully backfills"
