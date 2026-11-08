@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-09
+
 ### Fixed
 - A tracked chat that Telegram can no longer resolve (deleted, migrated to
   a supergroup, account left/kicked) no longer aborts the whole sync job.
@@ -12,6 +14,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`python sync.py --untrack <id>`) and continues with the remaining
   chats; previously one dead group killed the entire run and every chat
   after it went unsynced until it was removed.
+- Sidebar group list squished by tall nav (v0.7 Discover added 5 nav items).
+  The Groups section and sync card now have `min-height` guards and the
+  sidebar itself scrolls when content exceeds the viewport, so every
+  group row and the sync card remain usable on standard laptop screens.
+
+### Changed
+- `docs/installation.md`: add restart-after-upgrade warning (stale
+  processes mix old in-memory modules with new on-disk code) and
+  troubleshooting rows for the two sync symptoms above.
 
 ## [0.7.0] - 2026-11-08
 
