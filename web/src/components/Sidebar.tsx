@@ -84,7 +84,7 @@ export function Sidebar() {
             <span className="nav-ic">📌</span> Entities
           </button>
         </div>
-        <div style={{ height: 6 }} />
+        <div style={{ height: 2 }} />
         <button className={`nav-item ${mode === "browse" || mode === "search" ? "on" : ""}`} onClick={() => setMode("browse")}>
           <span className="nav-ic">🔍</span> Browse &amp; search
         </button>
