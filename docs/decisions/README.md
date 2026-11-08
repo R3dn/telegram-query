@@ -103,3 +103,11 @@ gate stays.
 
 **Context.** Two question-detectors would drift; the FAQ pipeline
 already encodes the product's conventions for threads and evidence.
+
+**Consequences.** One question-detector definition for both features; the
+FAQ pipeline's thread and evidence conventions apply everywhere.
+`open_questions` rows start `open`, and auto-resolution (a substantive
+reply) only touches rows still `open` — a human `answered`/`ignored` is
+final and rescans never overwrite it. Approved FAQ answers reach the
+radar as suggestions through the existing approval gate; there is no
+second path to trusted knowledge.

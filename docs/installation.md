@@ -5,8 +5,9 @@
 - **Python 3.10 or newer** (3.13 tested)
 - A Telegram account
 - *Optional:* an API key for any OpenAI-compatible provider (enables the
-  AI features: Ask-AI, deal extraction, research briefs, digests, and FAQ
-  answer drafting — everything else works without one)
+  AI features: Ask-AI, deal extraction, research briefs, digests, FAQ
+  answer drafting, opt-in entity discovery, and topic timelines —
+  everything else, including the whole Discover view, works without one)
 - *Not required:* Node.js — the frontend build (`web/dist`) is committed.
   Node 20+ is only needed to modify the frontend.
 
@@ -70,6 +71,10 @@ there later.
 python scripts/seed_demo.py
 ```
 
+The demo archive seeds cross-group announcements, Q&A threads, unanswered
+questions, recurring brand mentions, and Arabic content, then pre-builds
+the discovery data — the Discover view opens alive.
+
 Then run the app against the demo database instead of your real one:
 
 ```bash
@@ -108,6 +113,12 @@ Gulf dialect, elongation), and the index is rewritten in the background to
 match — visible in the Jobs panel, cancellable, and resumed on the next
 start if interrupted. You can also trigger it manually from
 **Settings → Rebuild search index**.
+
+Upgrading to v0.7 from a pre-v0.7 archive queues a one-time **Discover
+backfill** job on first start: term statistics, unanswered questions, and
+entity mentions are computed for your existing messages so the new
+Discover view opens complete — visible in the Jobs panel, and discovery
+is incremental from then on (deterministic; no AI involved).
 
 ## Troubleshooting
 

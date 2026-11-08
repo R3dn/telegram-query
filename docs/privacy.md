@@ -48,13 +48,13 @@ Only two channels exist, and both are yours to control:
      scheduled generation; unchanged periods are never re-sent
    - **FAQ answer drafting** — the clustered question variants plus nearby
      answer candidates; only for questions that recur
-    - **Entity discovery** (opt-in, off by default) — batches of new
-      messages above a per-chat watermark, only when you enable it in the
-      Entities view; unchanged batches are served from a local cache
-    - **Topic timelines** (Discover → "Timeline") — retrieved excerpts for
-      one topic, capped and deduplicated; an unchanged topic is served
-      from the local cache
-   
+   - **Entity discovery** (opt-in, off by default) — batches of new
+     messages above a per-chat watermark, only when you enable it in the
+     Entities view; unchanged batches are served from a local cache
+   - **Topic timelines** (Discover → "Timeline") — retrieved excerpts for
+     one topic, capped and deduplicated; an unchanged topic is served
+     from the local cache
+
    The UI discloses the provider next to each trigger (Ask-AI composer,
    Deals toolbar, digest/deal buttons). Do not configure an AI provider
    and nothing ever leaves your machine beyond Telegram sync traffic.
