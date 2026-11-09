@@ -19,6 +19,7 @@ session, zero external services.
                     │  ├─ bookmarks.py  stars + private notes        │
                     │  ├─ exports.py    Markdown/JSON downloads      │
                     │  ├─ deals.py      deals workspace              │
+                    │  ├─ decisions.py  decisions workspace         │
                     │  ├─ research.py   briefs workspace             │
                     │  ├─ monitor.py    watchlists + alerts inbox    │
                     │  ├─ digests.py    digests + schedules          │
@@ -33,7 +34,8 @@ session, zero external services.
                     │  scheduler.py  auto-sync loop (DB-persisted)  │
                     │  ai_tasks.py    shared AI task runner         │
                     │                 (routing: extract|synth|embed)│
-                    │  deals.py / research.py / digests.py / faq.py │
+                    │  deals.py / decisions.py / research.py /      │
+                    │                 digests.py / faq.py            │
                     │  watchlists.py  deterministic monitors         │
                     │  discover.py    term analytics / stories /     │
                     │                 questions / timeline          │
@@ -43,7 +45,7 @@ session, zero external services.
                                       │
                        ┌──────────────┴────────────────┐
                        │ SQLite (WAL) + FTS5            │
-                       │ data/messages.db  (schema v6)  │
+                       │ data/messages.db  (schema v7)  │
                        │ data/tg_session.session         │
                        └─────────────────────────────────┘
 ```
@@ -55,14 +57,15 @@ session, zero external services.
 | `config.py` | Single `Settings` object; env parsing, aliases, path resolution, normalization level, model routing (`AI_MODEL_EXTRACT/SYNTH/EMBED` with `AI_MODEL` fallback), daily AI cap |
 | `app.py` | Thin entry: routers, static serving, startup threads, post-sync + tick hook registration, upgrade backfill jobs (reindex, discovery) |
 | `api/` | HTTP routers grouped by domain; each opens its own DB connection |
-| `db.py` | Schema + versioned migrations (v6), upserts with **incremental FTS upkeep**, keyset-paginated browse, search (star/min-id filters), normalization, settings KV, verified `t.me` link builder, conversation reconstruction |
+| `db.py` | Schema + versioned migrations (v7), upserts with **incremental FTS upkeep**, keyset-paginated browse, search (star/min-id filters), normalization, settings KV, verified `t.me` link builder, conversation reconstruction |
 | `sync.py` | Telethon CLI/web sync; checkpointed resumable backfills; `reply_to` capture; `CANCEL` event honored between messages |
 | `auth.py` | Login steps (phone → code → 2FA); pending state kept in memory only |
-| `jobs.py` | JobRunner: jobs run **one at a time** (the Telegram session must not be used concurrently); queue with dedupe + priority; stdout captured for the live log; `POST_SYNC_HOOKS` + `TICK_HOOKS` seams; reindex/extract/brief/digest/faq/discover jobs |
+| `jobs.py` | JobRunner: jobs run **one at a time** (the Telegram session must not be used concurrently); queue with dedupe + priority; stdout captured for the live log; `POST_SYNC_HOOKS` + `TICK_HOOKS` seams; reindex/extract/decisions/brief/digest/faq/discover jobs |
 | `scheduler.py` | Auto-sync: DB-persisted schedule (`app_settings`), 30s loop, catch-up after downtime, never overlaps a running sync |
 | `ai.py` | Ask-AI: extract keywords (extract model) → FTS → (retry) → grounded answer (synth model); explicit scope chips override model guesses |
 | `ai_tasks.py` | Shared AI task layer: model routing per task type, fence-tolerant parsing, schema validation with ONE repair attempt, provider retries with backoff+jitter, per-fingerprint result cache, per-task usage recording **with the model that served it**, daily request cap, versioned prompts, shared citation validation |
 | `deals.py` | Deals pipeline: bilingual keyword net → batched schema-constrained extraction (extract model) → strict identity merge (sources preserved) → evidence-derived status; per-chat watermark for incremental runs |
+| `decisions.py` | v0.8 decisions pipeline (same contract as deals): bilingual keyword net → batched schema-constrained extraction → strict identity merge (title+owner+due) → citations verified against the archive; evidence-derived status (`completed`/`cancelled` only from the message's words, past due → `overdue`, no evidence → `unverified`); per-chat watermark for incremental runs |
 | `research.py` | Briefs: keyword retrieval + reply/neighbor context expansion → cited brief (synth model) → versioned saves; deterministic staleness |
 | `watchlists.py` | Deterministic keyword monitors over each sync's new messages; **never calls the AI** |
 | `digests.py` | Period digests with deterministic theme hints; schedule due-check + fingerprint reuse (synth model) |
@@ -95,7 +98,7 @@ Citations (`[n]`) are validated on the backend against the real retrieved
 set; unresolvable markers are stripped and reported.
 
 **Model routing (v0.7).** `AI_MODEL_EXTRACT` serves cheap structured
-tasks (deals, entities, keyword extraction), `AI_MODEL_SYNTH` serves
+tasks (deals, decisions, entities, keyword extraction), `AI_MODEL_SYNTH` serves
 answers/briefs/digests/FAQ answers/timelines, `AI_MODEL_EMBED` is
 reserved for the benchmark-gated hybrid retrieval. Every role falls
 back to `AI_MODEL` — routing is optional, provider-agnostic, and a
@@ -126,6 +129,10 @@ product.
 flags an approved answer for review instead of silently replacing it.
 Extracted deals carry evidence-derived status (`active` without validity
 evidence reads `unverified`) with confirm/dismiss/correct controls.
+Decisions follow the same doctrine: `completed`/`cancelled` come only
+from the message's own words, a past due date reads `overdue`, and a
+record without evidence reads `unverified` — the model's own judgment is
+kept in a separate column so extraction can never invent commitment.
 Question statuses are human-controlled and never overwritten by rescans.
 
 **Local-only posture.** No auth in-app; the default bind is `127.0.0.1`.

@@ -5,6 +5,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Decisions & commitments tracker** (first v0.8 Knowledge Intelligence
+  feature): team decisions, agreements, and action items inside your
+  groups become typed rows (decision text, kind, owner, due date,
+  status) with per-row citations, cross-group dedupe, human
+  confirm/dismiss/correct controls, exports (MD/JSON), an on-demand
+  extraction job, and opt-in incremental extraction after each sync.
+  Status is evidence-derived, never model-invented: `completed`/
+  `cancelled` come only from the message's own words, a past due date
+  reads `overdue`, and a record without evidence reads `unverified` —
+  nothing is ever silently "committed" forever. Extraction only sends
+  keyword-matched candidate messages (cached by fingerprint), never the
+  whole archive. Schema migration v6 → v7 (additive, idempotent).
+
 ## [0.7.1] - 2026-11-09
 
 ### Fixed

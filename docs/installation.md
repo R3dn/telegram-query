@@ -5,9 +5,10 @@
 - **Python 3.10 or newer** (3.13 tested)
 - A Telegram account
 - *Optional:* an API key for any OpenAI-compatible provider (enables the
-  AI features: Ask-AI, deal extraction, research briefs, digests, FAQ
-  answer drafting, opt-in entity discovery, and topic timelines —
-  everything else, including the whole Discover view, works without one)
+  AI features: Ask-AI, deal extraction, decision extraction, research
+  briefs, digests, FAQ answer drafting, opt-in entity discovery, and
+  topic timelines — everything else, including the whole Discover view,
+  works without one)
 - *Not required:* Node.js — the frontend build (`web/dist`) is committed.
   Node 20+ is only needed to modify the frontend.
 

@@ -51,6 +51,12 @@ Telegram session never leave it.
   code, discount, expiry) with per-row citations, cross-group dedupe,
   evidence-derived status, human confirm/correct controls, and optional
   incremental extraction after each sync.
+- **Decisions & commitments tracker** — team decisions, agreements, and
+  action items become typed records (kind, owner, due date, status) with
+  per-row citations, evidence-derived status (`overdue` for past due
+  dates; nothing is silently "committed" without evidence), confirm/
+  dismiss/correct controls, and optional incremental extraction after
+  each sync.
 - **Research briefs** — ask a question over selected groups and dates, get
   a saved, citation-validated, re-runnable brief with version history and
   deterministic staleness tracking.
@@ -189,7 +195,8 @@ normalization, sync checkpoints and resume, the job queue, the auto-sync
 scheduler, the AI pipeline and scope (with a mocked provider - no real
 credentials needed), setup/auth flows, saved searches, bookmarks and
 notes, deep links, exports, the citation mapping in the frontend,
-discovery (terms/stories/questions/entities/conversation), model
+discovery (terms/stories/questions/entities/conversation), decisions
+extraction (merge, evidence-derived status, human gates), model
 routing, and the daily budget cap. Contributions welcome - see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 

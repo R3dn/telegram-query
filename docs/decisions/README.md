@@ -111,3 +111,33 @@ reply) only touches rows still `open` — a human `answered`/`ignored` is
 final and rescans never overwrite it. Approved FAQ answers reach the
 radar as suggestions through the existing approval gate; there is no
 second path to trusted knowledge.
+
+## 0007 — Decisions reuse the deals contract; status is evidence-derived (2026-11-09)
+
+**Decision.** The v0.8 decisions & commitments tracker is built on the
+deals pipeline end to end: bilingual keyword net → FTS5 candidates →
+near-duplicate collapse (forwards stay citations) → batched
+schema-constrained extraction (one repair attempt, invalid output
+discarded) → source verification against the archive → strict identity
+merge (`title+owner+due_date`) → typed rows with per-row citations and
+confirm/dismiss/correct gates. The model's own status judgment lives in
+`status`; `derived_status` computes what the app shows: `completed`/
+`cancelled` only when the message's own words say so, `overdue` for a
+past due date, `unverified` without evidence — a record is never
+silently "committed" forever.
+
+**Context.** The deals pipeline already encodes the product's contract
+(citations must resolve, caches keyed by fingerprint, per-chat
+watermarks for incremental runs, human gates before anything counts as
+knowledge). Decisions are the same shape of problem — structured
+extraction over conversations with verifiable evidence — so a second
+architecture would only drift. `overdue` is computed from due dates
+rather than stored, so a growing backlog never requires rescans and
+follow-up tracking (P0 #2) can build on the same deterministic check.
+
+**Consequences.** One more AI surface with the same disclosure and
+minimization posture (keyword-matched candidates only, cached by
+fingerprint). Schema v7 adds `decisions` + `decision_sources`
+(additive, idempotent). Future follow-up tracking reads
+`derived_status` instead of duplicating the rule; the model's raw
+judgment stays inspectable in its own column for auditing.

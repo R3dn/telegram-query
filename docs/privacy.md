@@ -12,8 +12,9 @@ exactly what stays local and what can leave your machine.
 - **Bookmarks and private notes** — stored in your database. Notes are app
   metadata: they are **never** included in AI retrieval context and are
   deleted together with their message
-- **Saved searches, deals, research briefs, digests, FAQ records** — all
-  generated and stored locally; exports write to files you download
+- **Saved searches, deals, decisions, research briefs, digests, FAQ
+  records** — all generated and stored locally; exports write to files
+  you download
 - **The entire Discover view (v0.7)** — trending topics, cross-group
   stories, unanswered questions, group activity, and the entity
   gazetteer's mention matching are deterministic: computed from your
@@ -42,6 +43,10 @@ Only two channels exist, and both are yours to control:
      either on demand (visible job) or incrementally after a sync when you
      enable auto-extraction; unchanged batches are served from a local
      cache and re-sent to no one
+   - **Decision extraction** (v0.8) — the same shape as deals: batches of
+     keyword-matched candidate messages, on demand (visible job) or
+     incrementally after a sync when you enable auto-extraction;
+     unchanged batches are served from a local cache and re-sent to no one
    - **Research briefs** — retrieved excerpts for the brief's scope, plus
      the question
    - **Digests** — the period's messages (capped), for on-demand or
@@ -56,8 +61,9 @@ Only two channels exist, and both are yours to control:
      from the local cache
 
    The UI discloses the provider next to each trigger (Ask-AI composer,
-   Deals toolbar, digest/deal buttons). Do not configure an AI provider
-   and nothing ever leaves your machine beyond Telegram sync traffic.
+   Deals/Decisions toolbars, digest/deal buttons). Do not configure an AI
+   provider and nothing ever leaves your machine beyond Telegram sync
+   traffic.
 
 ## What is NOT done
 
@@ -69,10 +75,10 @@ Only two channels exist, and both are yours to control:
   access lines, which also stay local.)
 - API keys are never sent to the browser; the UI only learns whether AI is
   configured and the provider host for the disclosure line.
-- AI outputs are never silently trusted: extracted deals cite verifiable
-  source messages, brief/digest/FAQ citations are validated on the
-  backend against your real archive, and FAQ answers require your
-  approval before they count as knowledge.
+- AI outputs are never silently trusted: extracted deals and decisions
+  cite verifiable source messages, brief/digest/FAQ citations are
+  validated on the backend against your real archive, and FAQ answers
+  require your approval before they count as knowledge.
 
 ## Deletion
 
@@ -81,10 +87,10 @@ Only two channels exist, and both are yours to control:
   the group again (a full backfill runs, but it is mostly a no-op).
 - Remove a group and its data: **🗑 delete** (next to untrack in Manage
   groups) permanently removes that group's messages from the database and
-  resets its sync state. Bookmarks, deal sources, brief/digest citations,
-  and alerts pointing at those messages are removed with them (foreign
-  keys cascade). This cannot be undone; re-tracking re-downloads the
-  history from Telegram.
+  resets its sync state. Bookmarks, deal/decision sources, brief/digest
+  citations, and alerts pointing at those messages are removed with them
+  (foreign keys cascade). This cannot be undone; re-tracking re-downloads
+  the history from Telegram.
 - Delete everything: stop the app and delete the `data/` directory and
   `.env`. To revoke the app's Telegram access, also terminate the session
   from Telegram's "Active sessions" settings.
@@ -95,6 +101,8 @@ Only two channels exist, and both are yours to control:
   each truncated) — you control the ceiling.
 - Deal extraction batches are keyword-filtered candidates only, capped per
   batch; incremental runs read only messages above a per-chat watermark.
+- Decision extraction follows the same rule: keyword-filtered candidates
+  only, capped per batch, above a per-chat watermark for incremental runs.
 - Digests cap the period's messages (500) and collapse duplicates before
   anything is sent.
 - Research briefs retrieve within the scope you pick and expand context

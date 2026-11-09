@@ -41,9 +41,9 @@ Any OpenAI-compatible chat-completions endpoint works: OpenAI, Azure,
 Groq, Together, OpenRouter, Ollama (`http://localhost:11434/v1`), LM
 Studio, vLLM, and compatible local servers.
 
-Ask-AI, deal extraction, research briefs, digests, FAQ answer
-drafting, and the (optional) topic timeline all use this one provider.
-Each AI feature can be disabled independently in the UI; without
+Ask-AI, deal extraction, decision extraction, research briefs, digests,
+FAQ answer drafting, and the (optional) topic timeline all use this one
+provider. Each AI feature can be disabled independently in the UI; without
 `AI_API_KEY` they all show clear "not configured" states while search,
 browsing, sync, watchlists, alerts, and the entire Discover view keep
 working (discovery and watchlists never use AI at all).
@@ -53,7 +53,7 @@ working (discovery and watchlists never use AI at all).
 | `AI_BASE_URL` | OpenAI | Base URL of the endpoint |
 | `AI_API_KEY` | — | Key; AI features stay disabled until set |
 | `AI_MODEL` | `gpt-4o-mini` | Model name as the endpoint expects it |
-| `AI_MODEL_EXTRACT` | falls back to `AI_MODEL` | Cheap/fast model for structured tasks (deal extraction, entity discovery, keyword extraction) |
+| `AI_MODEL_EXTRACT` | falls back to `AI_MODEL` | Cheap/fast model for structured tasks (deal extraction, decision extraction, entity discovery, keyword extraction) |
 | `AI_MODEL_SYNTH` | falls back to `AI_MODEL` | Model for answers, briefs, digests, FAQ answers, topic timelines |
 | `AI_MODEL_EMBED` | falls back to `AI_MODEL` | Reserved for the benchmark-gated hybrid retrieval (v0.8) |
 | `AI_TEMPERATURE` | `0.2` | Generation temperature |
