@@ -106,6 +106,9 @@ export function Sidebar() {
         <button className={`nav-item ${mode === "deals" ? "on" : ""}`} onClick={() => setMode("deals")}>
           <span className="nav-ic">🏷</span> Deals
         </button>
+        <button className={`nav-item ${mode === "decisions" ? "on" : ""}`} onClick={() => setMode("decisions")}>
+          <span className="nav-ic">⚖</span> Decisions
+        </button>
         <button className={`nav-item ${mode === "research" ? "on" : ""}`} onClick={() => setMode("research")}>
           <span className="nav-ic">🔬</span> Research
         </button>

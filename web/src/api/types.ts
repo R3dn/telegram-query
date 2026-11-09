@@ -85,6 +85,41 @@ export interface DealsSettings {
   watermark: Record<string, number>;
 }
 
+export interface DecisionSource {
+  chat_id: number;
+  msg_id: number;
+  text: string | null;
+  date: string | null;
+  sender_name: string | null;
+  chat_title: string | null;
+  tg_link: string | null;
+  missing: boolean;
+}
+
+export interface Decision {
+  id: number;
+  title: string;
+  detail: string;
+  kind: string | null;        // decision | commitment | plan
+  owner: string | null;
+  due_date: string | null;
+  status: string;            // model judgment: proposed|committed|completed|cancelled|unknown
+  user_status: string | null; // human: confirmed | dismissed | null
+  confidence: number | null;
+  derived_status: string;     // evidence-derived: ...|overdue|unverified
+  confidence_label: string;
+  human_added: boolean;
+  last_seen: string;
+  sources: DecisionSource[];
+}
+
+export interface DecisionsSettings {
+  auto: boolean;
+  kinds: string[];
+  owners: string[];
+  watermark: Record<string, number>;
+}
+
 export interface BriefCitation {
   idx: number;
   chat_id: number;

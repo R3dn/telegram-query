@@ -7,6 +7,7 @@ import { FilterBar } from "./components/FilterBar";
 import { Feed } from "./components/Feed";
 import { BookmarksView } from "./components/BookmarksView";
 import { DealsView } from "./components/DealsView";
+import { DecisionsView } from "./components/DecisionsView";
 import { ResearchView } from "./components/ResearchView";
 import { AlertsView, WatchView } from "./components/WatchView";
 import { DigestsView } from "./components/DigestsView";
@@ -74,6 +75,8 @@ export default function App() {
             <BookmarksView />
           ) : mode === "deals" ? (
             <DealsView />
+          ) : mode === "decisions" ? (
+            <DecisionsView />
           ) : mode === "research" ? (
             <ResearchView />
           ) : mode === "watchlists" ? (

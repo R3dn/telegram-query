@@ -17,8 +17,8 @@ import threading
 import time
 
 __all__ = ["JOBS", "JobRunner", "run_sync_job", "fetch_dialogs_job",
-           "run_reindex_job", "run_discover_job", "POST_SYNC_HOOKS",
-           "DIALOGS_CACHE"]
+           "run_reindex_job", "run_discover_job", "run_decisions_job",
+           "POST_SYNC_HOOKS", "DIALOGS_CACHE"]
 
 # Callables run after every SUCCESSFUL sync job (no args). Registered by
 # features that need incremental work on new messages (v0.6 watchlists,
@@ -45,7 +45,7 @@ class JobRunner:
         other queued jobs."""
         with self.lock:
             if name in ("sync", "dialogs", "extract", "brief", "digest", "faq",
-                    "discover"):
+                        "discover", "decisions"):
                 if (self.running and self.name == name) or \
                         any(n == name for n, _ in self.queue):
                     return False
@@ -188,6 +188,20 @@ def run_extract_job(chat_ids=None, date_from=None, date_to=None):
               f"{', {date_from}..{date_to}' if date_from or date_to else ''})")
         deals.extract(conn, chat_ids=chat_ids, date_from=date_from,
                       date_to=date_to)
+    finally:
+        conn.close()
+
+
+def run_decisions_job(chat_ids=None, date_from=None, date_to=None):
+    """Decisions extraction over a scope (backfill), as a visible job."""
+    import decisions
+    conn = db_get_db()
+    try:
+        print(f"[decisions] extracting decisions (scope: "
+              f"{len(chat_ids) if chat_ids else 'all'} group(s)"
+              f"{', {date_from}..{date_to}' if date_from or date_to else ''})")
+        decisions.extract(conn, chat_ids=chat_ids, date_from=date_from,
+                          date_to=date_to)
     finally:
         conn.close()
 

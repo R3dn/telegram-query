@@ -411,10 +411,44 @@ CREATE TABLE IF NOT EXISTS open_questions (
 );
 CREATE INDEX IF NOT EXISTS idx_open_questions_status
     ON open_questions(status, asked_at);
+
+-- v0.8: decisions & commitments ------------------------------------------
+-- Structured decision/commitment records extracted from conversations.
+-- Same contract as deals: typed rows, per-row citations verified against
+-- the archive, computed status, human confirm/dismiss gate.
+CREATE TABLE IF NOT EXISTS decisions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    title        TEXT NOT NULL,               -- decision text (source language)
+    detail       TEXT NOT NULL DEFAULT '',    -- one-line context/scope
+    kind         TEXT,                        -- decision | commitment | plan
+    owner        TEXT,                        -- person/team that owns it
+    due_date     TEXT,                        -- YYYY-MM-DD or NULL
+    status       TEXT NOT NULL DEFAULT 'proposed', -- extracted judgment
+    user_status  TEXT,                        -- human: confirmed|dismissed
+    confidence   REAL,
+    fingerprint  TEXT NOT NULL DEFAULT '',
+    prompt_version TEXT NOT NULL DEFAULT '',
+    model        TEXT NOT NULL DEFAULT '',
+    first_seen   TEXT NOT NULL,
+    last_seen    TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS decision_sources (
+    decision_id INTEGER NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+    chat_id     INTEGER NOT NULL,
+    msg_id      INTEGER NOT NULL,
+    PRIMARY KEY (decision_id, chat_id, msg_id),
+    FOREIGN KEY (chat_id, msg_id) REFERENCES messages(chat_id, msg_id)
+        ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_last_seen ON decisions(last_seen);
+CREATE INDEX IF NOT EXISTS idx_decisions_due ON decisions(due_date);
+CREATE INDEX IF NOT EXISTS idx_decision_sources_msg
+    ON decision_sources(chat_id, msg_id);
 """
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def _migrate(conn):
@@ -472,6 +506,10 @@ def _migrate(conn):
                 "INSERT OR REPLACE INTO app_settings (key, value) "
                 "VALUES ('needs_discover_backfill', '1')")
         current = 6
+    if current < 7:
+        # v7: decisions layer (decisions/decision_sources, created by
+        # SCHEMA for fresh and existing databases). No data transforms.
+        current = 7
     conn.execute(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)",
         (str(current),))

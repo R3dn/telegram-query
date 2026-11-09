@@ -23,6 +23,7 @@ import auth as tg_auth
 import config
 import db
 import deals
+import decisions
 import entities
 import jobs
 import scheduler
@@ -31,6 +32,7 @@ from api import archive, general, groups
 from api import auth as auth_api
 from api import bookmarks as bookmarks_api
 from api import deals as deals_api
+from api import decisions as decisions_api
 from api import digests as digests_api
 from api import discover as discover_api
 from api import exports as exports_api
@@ -112,6 +114,10 @@ async def lifespan(app: FastAPI):
         jobs.POST_SYNC_HOOKS.append(discover.post_sync_hook)
     if entities.post_sync_hook not in jobs.POST_SYNC_HOOKS:
         jobs.POST_SYNC_HOOKS.append(entities.post_sync_hook)
+    # v0.8: incremental decisions extraction after each sync (no-op
+    # unless the user enabled it)
+    if decisions.post_sync_hook not in jobs.POST_SYNC_HOOKS:
+        jobs.POST_SYNC_HOOKS.append(decisions.post_sync_hook)
     _start_discover_backfill_if_needed()
     yield
 
@@ -125,7 +131,7 @@ for router in (general.router, auth_api.router, archive.router,
                scheduler_api.router, saved_api.router, bookmarks_api.router,
                exports_api.router, deals_api.router, research_api.router,
                monitor_api.router, faqs_api.router, digests_api.router,
-               discover_api.router):
+               discover_api.router, decisions_api.router):
     app.include_router(router)
 
 

@@ -11,6 +11,8 @@ import type {
   ConversationContext,
   Deal,
   DealsSettings,
+  Decision,
+  DecisionsSettings,
   Digest,
   DigestSchedule,
   Dialog,
@@ -195,6 +197,35 @@ export const api = {
     post<{ auto: boolean }>("/api/deals/auto", { enabled }),
   exportDeals: (format: "md" | "json") =>
     download(`/api/export/deals?format=${format}`),
+
+  // decisions (v0.8)
+  decisions: (p?: {
+    status?: string; kind?: string; owner?: string; group?: string;
+    q?: string; from?: string; to?: string; sort?: string;
+  }) => {
+    const q = new URLSearchParams();
+    if (p?.status) q.set("status", p.status);
+    if (p?.kind) q.set("kind", p.kind);
+    if (p?.owner) q.set("owner", p.owner);
+    if (p?.group) q.set("group", p.group);
+    if (p?.q) q.set("q", p.q);
+    if (p?.from) q.set("from_", p.from);
+    if (p?.to) q.set("to", p.to);
+    if (p?.sort) q.set("sort", p.sort);
+    return req<Decision[]>(`/api/decisions${q.size ? `?${q}` : ""}`);
+  },
+  decisionPatch: (id: number, p: Record<string, unknown>) =>
+    patch<Decision>(`/api/decisions/${id}`, p),
+  decisionDelete: (id: number) =>
+    req<{ ok: boolean }>(`/api/decisions/${id}`, { method: "DELETE" }),
+  decisionAdd: (p: Record<string, unknown>) => post<Decision>("/api/decisions", p),
+  decisionsExtract: (p: { chat_ids: number[]; date_from?: string | null; date_to?: string | null }) =>
+    post<{ started: boolean }>("/api/decisions/extract", p),
+  decisionsSettings: () => req<DecisionsSettings>("/api/decisions/settings"),
+  decisionsAuto: (enabled: boolean) =>
+    post<{ auto: boolean }>("/api/decisions/auto", { enabled }),
+  exportDecisions: (format: "md" | "json") =>
+    download(`/api/export/decisions?format=${format}`),
 
   // research briefs (v0.5)
   briefs: () => req<Brief[]>("/api/briefs"),

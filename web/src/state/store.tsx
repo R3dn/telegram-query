@@ -29,6 +29,7 @@ export type FeedMode =
   | "search"
   | "bookmarks"
   | "deals"
+  | "decisions"
   | "research"
   | "watchlists"
   | "alerts"

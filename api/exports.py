@@ -224,6 +224,73 @@ def export_deals(format: str = "md"):
                      f"telegram-query-deals-{_today()}.md", "text/markdown")
 
 
+@router.get("/api/export/decisions")
+def export_decisions(format: str = "md"):
+    """All decisions + their sources (structured knowledge records)."""
+    import decisions as decisions_mod
+    with open_db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM decisions ORDER BY last_seen DESC").fetchall()]
+        sources = {}
+        for d in rows:
+            src = conn.execute(
+                """SELECT s.chat_id, s.msg_id, m.text, m.date, m.sender_name,
+                          c.title AS chat_title, c.username AS chat_username
+                   FROM decision_sources s
+                   LEFT JOIN messages m ON m.chat_id = s.chat_id AND m.msg_id = s.msg_id
+                   LEFT JOIN chats c   ON c.chat_id = m.chat_id
+                   WHERE s.decision_id=? ORDER BY m.date DESC""",
+                (d["id"],)).fetchall()
+            sources[d["id"]] = []
+            for s in src:
+                sd = dict(s)
+                sd["tg_link"] = db.message_link(
+                    sd["chat_id"], sd.pop("chat_username"), sd["msg_id"])
+                sources[d["id"]].append(sd)
+            d["derived_status"] = decisions_mod.derived_status(d)
+            d["confidence_label"] = decisions_mod.confidence_label(
+                d.get("confidence"))
+
+    if format == "json":
+        for d in rows:
+            d["sources"] = sources[d["id"]]
+        data = {"exported_at": datetime.now(timezone.utc).isoformat(),
+                "count": len(rows), "decisions": rows}
+        return _download(json.dumps(data, ensure_ascii=False, indent=2),
+                         f"telegram-query-decisions-{_today()}.json",
+                         "application/json")
+
+    lines = ["# Telegram Query - Decisions", "",
+             f"Exported {_today()} (UTC) - {len(rows)} decision(s).", ""]
+    for d in rows:
+        bits = [f"## {d['title']}"]
+        meta = []
+        if d.get("kind"):
+            meta.append(f"kind: {d['kind']}")
+        if d.get("owner"):
+            meta.append(f"owner: {d['owner']}")
+        if d.get("due_date"):
+            meta.append(f"due: {d['due_date']}")
+        meta.append(f"status: {d['derived_status']}"
+                    + (" (confirmed)" if d.get("user_status") == "confirmed"
+                       else ""))
+        bits.append(" · ".join(meta))
+        if d.get("detail"):
+            bits.append(f"\n{d['detail']}")
+        for s in sources[d["id"]]:
+            date = (s["date"] or "")[:10]
+            src_txt = (s["text"] or "").splitlines()
+            first = src_txt[0][:140] if src_txt else "[no text]"
+            bits.append(f"- {_md_escape(s['chat_title'] or '?')} · {date}: "
+                        f"{_md_escape(first)}"
+                        + (f" ([Telegram]({s['tg_link']}))" if s["tg_link"]
+                           else ""))
+        lines.append("\n".join(bits) + "\n")
+    return _download("\n".join(lines),
+                     f"telegram-query-decisions-{_today()}.md",
+                     "text/markdown")
+
+
 @router.get("/api/export/briefs/{brief_id}")
 def export_brief(brief_id: int, format: str = "md"):
     """One research brief + validated citations + metadata."""

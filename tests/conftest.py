@@ -45,6 +45,8 @@ def api_client():
         c.execute("DELETE FROM saved_searches")
         c.execute("DELETE FROM deal_sources")
         c.execute("DELETE FROM deals")
+        c.execute("DELETE FROM decision_sources")
+        c.execute("DELETE FROM decisions")
         c.execute("DELETE FROM brief_citations")
         c.execute("DELETE FROM brief_versions")
         c.execute("DELETE FROM briefs")

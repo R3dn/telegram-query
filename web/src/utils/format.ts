@@ -72,22 +72,28 @@ export function jobLabel(name: string | null | undefined): string {
       reindex: "Reindex",
       discover: "Discovery backfill",
       extract: "Deals extraction",
+      decisions: "Decisions extraction",
       brief: "Research brief",
     } as Record<string, string>
   )[name ?? ""] ?? "Job";
 }
 
-/** Status chip color class for derived deal states. */
+/** Status chip color class for derived deal/decision states. */
 export function statusTone(status: string): string {
   return (
     {
       active: "good",
       confirmed: "good",
+      committed: "good",
+      completed: "good",
       upcoming: "warn",
       unverified: "warn",
+      proposed: "warn",
       unknown: "",
       expired: "err",
+      overdue: "err",
       dismissed: "err",
+      cancelled: "err",
     } as Record<string, string>
   )[status] ?? "";
 }
