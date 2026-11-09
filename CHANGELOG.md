@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-09
+
+Knowledge Intelligence: turning conversations into structured, reusable
+knowledge that keeps verifiable references to its original messages.
+The first release of the v0.8 line adds the decisions & commitments
+tracker; follow-up tracking and the Evidence Explorer follow.
+
 ### Added
 - **Decisions & commitments tracker** (first v0.8 Knowledge Intelligence
   feature): team decisions, agreements, and action items inside your
