@@ -30,6 +30,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import config  # noqa: E402  (version source of truth)
+
 PASS: list[str] = []
 FAIL: list[str] = []
 
@@ -136,7 +139,8 @@ def main() -> int:
     print("\n[1] app state & health")
     code, st = get(base, "/api/health")
     check("health 200", code == 200)
-    check("version is 0.7.0", st.get("version") == "0.7.0", str(st))
+    check("version matches config", st.get("version") == config.__version__,
+          str(st))
     code, st = get(base, "/api/app/state")
     check("app state 200", code == 200)
     check("ai configured via mock", st.get("ai_configured") is True)

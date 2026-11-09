@@ -169,16 +169,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // v9: debounced - rapid group toggles fired one senders request per
+    // click; the last state wins after a short settle window.
     let cancelled = false;
-    (async () => {
-      try {
-        const list = await api.senders([...selection]);
-        if (!cancelled) setSenders(list);
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => { cancelled = true; };
+    const t = setTimeout(() => {
+      (async () => {
+        try {
+          const list = await api.senders([...selection]);
+          if (!cancelled) setSenders(list);
+        } catch {
+          /* ignore */
+        }
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [selection, groups]);
 
   const toggleGroup = useCallback((id: number) => {
@@ -221,10 +228,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const cursorRef = useRef<string | null>(null);
   const loadSeq = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
 
   const loadFeed = useCallback(
     async (reset = true) => {
       const seq = ++loadSeq.current;
+      // v9: cancel the previous in-flight load - stale requests used to
+      // consume a server thread and then get discarded by the seq guard
+      loadAbortRef.current?.abort();
+      const ac = new AbortController();
+      loadAbortRef.current = ac;
       setLoading(true);
       if (reset) {
         cursorRef.current = null;
@@ -242,6 +255,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             q, groups: [...selection], sender: filters.sender,
             from: filters.from, to: filters.to,
             bookmarked: filters.starred || undefined,
+            signal: ac.signal,
           });
           rows = rows.slice().sort((a, b) => (filters.sort === "asc" ? (a.date < b.date ? -1 : 1) : a.date > b.date ? -1 : 1));
           if (seq !== loadSeq.current) return;
@@ -258,6 +272,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             limit: 50,
             sort: filters.sort,
             bookmarked: filters.starred || undefined,
+            signal: ac.signal,
           });
           if (seq !== loadSeq.current) return;
           setFeed((f) => (reset ? page.messages : [...f, ...page.messages]));
@@ -265,6 +280,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           setHasMore(page.has_more);
         }
       } catch (e) {
+        if ((e as Error).name === "AbortError") return; // superseded load
         toast(`Load failed: ${(e as Error).message}`, "err");
       } finally {
         if (seq === loadSeq.current) setLoading(false);

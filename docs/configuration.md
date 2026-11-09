@@ -59,6 +59,7 @@ working (discovery and watchlists never use AI at all).
 | `AI_TEMPERATURE` | `0.2` | Generation temperature |
 | `AI_MAX_SOURCES` | `80` | Max messages sent as context per question |
 | `TGQ_AI_DAILY_CAP` | `0` (off) | Max AI requests per UTC day — AI features fail with honest errors at the cap; deterministic features are never affected |
+| `TGQ_AI_MAX_CONCURRENCY` | `4` | Max provider requests in flight at once; extra asks wait up to the request timeout, then fail with an honest busy error (protects the server from provider-latency pile-ups) |
 | `TGQ_GROUPS_HINT` | — | Free-text description of your communities, injected into the keyword extractor to sharpen retrieval (e.g. "local restaurant deal groups in Riyadh") |
 
 ## Search normalization (v0.4)

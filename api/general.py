@@ -1,7 +1,9 @@
-﻿"""General endpoints: health and first-run application state."""
+﻿"""General endpoints: health (liveness), readiness, and first-run
+application state."""
 from __future__ import annotations
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 import auth
 import config
@@ -14,7 +16,34 @@ router = APIRouter()
 
 @router.get("/api/health")
 def health():
+    """Liveness: the process is up. Deliberately touches nothing - a
+    liveness probe must not fail because a dependency is slow."""
     return {"ok": True, "version": config.__version__}
+
+
+@router.get("/api/health/ready")
+def readiness():
+    """Readiness: can this instance serve requests? Fails only when the
+    archive database is unreachable (the one hard dependency). Optional
+    dependencies (Telegram session, AI provider) are reported as
+    informational and can never fail readiness by design."""
+    checks = {"db": False}
+    try:
+        with open_db() as conn:
+            conn.execute("SELECT 1 FROM app_settings LIMIT 1").fetchone()
+        checks["db"] = True
+    except Exception:  # noqa: BLE001 - reported, not raised
+        return JSONResponse(
+            {"ok": False, "checks": checks,
+             "error": "archive database unavailable"},
+            status_code=503)
+    return {
+        "ok": True,
+        "checks": checks,
+        "telegram_configured": config.settings.telegram_configured,
+        "ai_configured": config.settings.ai_configured,
+        "version": config.__version__,
+    }
 
 
 @router.get("/api/app/state")

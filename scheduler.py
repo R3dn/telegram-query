@@ -170,3 +170,10 @@ def run_loop(interval_s: float = 30.0):
 def stop():
     """Ask the loop to exit (tests)."""
     _STOP.set()
+
+
+def reset():
+    """Clear the stop flag so a newly started run_loop runs. Called on
+    app startup: a previous in-process instance's graceful shutdown must
+    not leave the scheduler dead for the next one."""
+    _STOP.clear()

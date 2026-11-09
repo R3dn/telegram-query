@@ -44,11 +44,14 @@ session, zero external services.
                     │  config.py  Settings from env / .env          │
                     └─────────────────┬─────────────────────────────┘
                                       │
-                       ┌──────────────┴────────────────┐
-                       │ SQLite (WAL) + FTS5            │
-                       │ data/messages.db  (schema v8)  │
-                       │ data/tg_session.session         │
-                       └─────────────────────────────────┘
+                        ┌──────────────┴─────────────────┐
+                        │ SQLite (WAL, synchronous=NORMAL) │
+                        │ data/messages.db  (schema v9)     │
+                        │  keyset index (date,chat,msg_id)  │
+                        │  chat_sender + reply indexes (v9) │
+                        │  FTS5 trigram external-content     │
+                        │ data/tg_session.session            │
+                        └────────────────────────────────┘
 ```
 
 ## Modules
@@ -56,14 +59,14 @@ session, zero external services.
 | File | Role |
 |---|---|
 | `config.py` | Single `Settings` object; env parsing, aliases, path resolution, normalization level, model routing (`AI_MODEL_EXTRACT/SYNTH/EMBED` with `AI_MODEL` fallback), daily AI cap |
-| `app.py` | Thin entry: routers, static serving, startup threads, post-sync + tick hook registration, upgrade backfill jobs (reindex, discovery) |
-| `api/` | HTTP routers grouped by domain; each opens its own DB connection |
-| `db.py` | Schema + versioned migrations (v8), upserts with **incremental FTS upkeep**, keyset-paginated browse, search (star/min-id filters), normalization, settings KV, verified `t.me` link builder, conversation reconstruction |
+| `app.py` | Thin entry: routers, static serving (immutable hashed assets, v9 security headers), startup threads, graceful shutdown (v9: cancel running job, clean state), post-sync + tick hook registration, upgrade backfill jobs (reindex, discovery), non-loopback bind warning |
+| `api/` | HTTP routers grouped by domain; each opens its own DB connection; `/api/health/ready` readiness (v9) |
+| `db.py` | Schema + versioned migrations (v9: composite keyset index `(date,chat_id,msg_id)` with row-value cursors, `chat_sender`/`reply` indexes, one-time ANALYZE + post-sync `analyze_if_stale` maintenance), WAL + `synchronous=NORMAL`, fast-path upserts (FTS upkeep only when text changes), upserts with **incremental FTS upkeep**, keyset-paginated browse, rank-subquery search (filters before LIMIT, joins after), single-query round-robin `search_diverse`, settings KV, verified `t.me` link builder, conversation reconstruction |
 | `sync.py` | Telethon CLI/web sync; checkpointed resumable backfills; `reply_to` capture; `CANCEL` event honored between messages |
 | `auth.py` | Login steps (phone → code → 2FA); pending state kept in memory only |
 | `jobs.py` | JobRunner: jobs run **one at a time** (the Telegram session must not be used concurrently); queue with dedupe + priority; stdout captured for the live log; `POST_SYNC_HOOKS` + `TICK_HOOKS` seams; reindex/extract/decisions/brief/digest/faq/discover jobs |
 | `scheduler.py` | Auto-sync: DB-persisted schedule (`app_settings`), 30s loop, catch-up after downtime, never overlaps a running sync |
-| `ai.py` | Ask-AI: extract keywords (extract model) → FTS → (retry) → grounded answer (synth model); explicit scope chips override model guesses |
+| `ai.py` | Ask-AI: extract keywords (extract model) → FTS (`search_diverse`, one query per attempt) → (retry) → grounded answer (synth model); explicit scope chips override model guesses; v9: process-cached provider client (rebuilt on settings change), bounded provider concurrency (`TGQ_AI_MAX_CONCURRENCY`), real token usage recording |
 | `ai_tasks.py` | Shared AI task layer: model routing per task type, fence-tolerant parsing, schema validation with ONE repair attempt, provider retries with backoff+jitter, per-fingerprint result cache, per-task usage recording **with the model that served it**, daily request cap, versioned prompts, shared citation validation |
 | `deals.py` | Deals pipeline: bilingual keyword net → batched schema-constrained extraction (extract model) → strict identity merge (sources preserved) → evidence-derived status; per-chat watermark for incremental runs |
 | `decisions.py` | v0.8 decisions pipeline (same contract as deals): bilingual keyword net → batched schema-constrained extraction → strict identity merge (title+owner+due) → citations verified against the archive; evidence-derived status (`completed`/`cancelled` only from the message's words, past due → `overdue`, no evidence → `unverified`); per-chat watermark for incremental runs. v0.8.1 adds deterministic follow-up tracking: open decisions are checked after each sync for newer messages matching ≥ 2 title keywords (shared discovery stopwords), stored as per-decision follow-up citations above an advancing watermark — never AI, never a full-archive scan |
@@ -142,6 +145,21 @@ The Evidence Explorer (v0.8.1) closes the loop from the other side:
 every citation table is queryable in reverse, so any message can prove
 what was built on top of it.
 
-**Local-only posture.** No auth in-app; the default bind is `127.0.0.1`.
-The docs and UI disclose exactly what leaves the machine (retrieved
-excerpts, on request, to your chosen endpoint — see [privacy.md](privacy.md)).
+**Local-only posture.** No auth in-app; the default bind is `127.0.0.1`
+(a non-loopback bind logs a loud warning). The docs and UI disclose
+exactly what leaves the machine (retrieved excerpts, on request, to
+your chosen endpoint — see [privacy.md](privacy.md)).
+
+**v9 engineering pass** (2026-11): a full audit, measured baseline,
+and targeted optimization round live in
+[docs/engineering/](engineering/) — the short version of what changed
+architecturally: the archive's hot read paths are index-satisfiable by
+construction (composite keyset index + row-value cursors, sender/reply
+indexes, planner statistics refreshed on a doubling threshold after
+syncs), search ranks in a subquery with all filters applied before the
+LIMIT and joins only afterward, the AI provider layer is a single
+cached client with bounded concurrency and real token accounting,
+liveness (`/api/health`) and readiness (`/api/health/ready`) are
+separate, shutdown is graceful, and `scripts/benchmark.py` +
+`scripts/backup_db.py` make performance and backups repeatable
+operations rather than hopes.

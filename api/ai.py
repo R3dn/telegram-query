@@ -48,6 +48,10 @@ class AskRequest(BaseModel):
 def _provider_error(exc: Exception):
     """Map provider/SDK exceptions to friendly, actionable errors."""
     import openai
+
+    import ai as ai_module
+    if isinstance(exc, ai_module.AIBusyError):
+        return JSONResponse({"error": str(exc)}, status_code=503)
     if isinstance(exc, openai.APITimeoutError):
         return JSONResponse(
             {"error": "The AI provider timed out. Try again, or use a "

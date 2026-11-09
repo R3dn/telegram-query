@@ -148,8 +148,18 @@ CREATE TABLE IF NOT EXISTS messages (
     PRIMARY KEY (chat_id, msg_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date);
+-- v9: the composite index makes keyset pagination a direct index seek:
+-- ORDER BY date,chat_id,msg_id is a backward walk (0.08ms pages at 500k
+-- rows, measured) and serves every query the old (date) index served.
+CREATE INDEX IF NOT EXISTS idx_messages_date_id
+    ON messages(date, chat_id, msg_id);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_date ON messages(chat_id, date);
+-- NOTE (v9): the query-acceleration indexes (idx_messages_chat_sender,
+-- idx_messages_reply) are created by the v9 MIGRATION, not here - they
+-- reference columns (sender_name is always present; reply_to is added
+-- by the v4 migration) and must not run before old databases are
+-- migrated. Fresh databases get them from the v9 branch too (it runs
+-- for every database whose recorded version is < 9).
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     text_norm,
@@ -466,7 +476,7 @@ CREATE INDEX IF NOT EXISTS idx_decision_followups_msg
 """
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 def _migrate(conn):
@@ -532,6 +542,25 @@ def _migrate(conn):
         # v8: deterministic decision follow-ups (decision_followups,
         # created by SCHEMA). No data transforms.
         current = 8
+    if current < 9:
+        # v9: query-acceleration indexes + fresh planner statistics.
+        # Additive only, except idx_messages_date which is REPLACED by
+        # the prefix-compatible composite idx_messages_date_id (same
+        # queries, faster keyset pagination); ANALYZE refreshes
+        # sqlite_stat1 once (0.33s at 500k rows - measured in
+        # docs/engineering/PERFORMANCE_BASELINE.md).
+        conn.execute("CREATE INDEX IF NOT EXISTS "
+                     "idx_messages_date_id ON messages(date, chat_id, msg_id)")
+        conn.execute("DROP INDEX IF EXISTS idx_messages_date")
+        conn.execute("CREATE INDEX IF NOT EXISTS "
+                     "idx_messages_chat_sender ON messages(chat_id, sender_name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS "
+                     "idx_messages_reply ON messages(chat_id, reply_to)")
+        try:
+            conn.execute("ANALYZE")
+        except sqlite3.OperationalError:
+            pass  # never block startup on statistics
+        current = 9
     conn.execute(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)",
         (str(current),))
@@ -543,8 +572,17 @@ def get_db(path: str = None) -> sqlite3.Connection:
     conn = sqlite3.connect(p, timeout=20.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # WAL companion: fsync once per checkpoint instead of every commit.
+    # Crash-safe for this app (ingest is checkpointed + idempotent); a
+    # power loss can lose the last few seconds of a backfill, which the
+    # next sync re-fetches from its checkpoint.
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=20000")
     conn.execute("PRAGMA foreign_keys=ON")
+    # 8 MB page cache per connection (default ~2 MB): keeps the FTS index
+    # hot for long-lived connections (sync jobs, scheduler); request
+    # connections live milliseconds and never grow it.
+    conn.execute("PRAGMA cache_size=-8000")
     if str(p) not in _INITIALIZED:
         conn.executescript(SCHEMA)
         _migrate(conn)
@@ -564,6 +602,28 @@ def init_db(path: str = None):
 # ---------------------------------------------------------------------------
 # App settings (scheduler state, reindex flags, future feature settings)
 # ---------------------------------------------------------------------------
+
+def analyze_if_stale(conn=None) -> bool:
+    """Refresh SQLite planner statistics when the archive has grown
+    substantially since the last run. Registered as a post-sync hook:
+    ANALYZE cost is proportional to index size (0.33 s at 500k rows),
+    so it must not run after every sync - the doubling threshold keeps
+    it amortized O(log growth)."""
+    own = conn is None
+    c = get_db() if own else conn
+    try:
+        n = c.execute("SELECT COUNT(*) c FROM messages").fetchone()["c"]
+        last = int(get_setting(c, "analyze_count", "0") or 0)
+        if n >= last * 2 and n - last >= 5000:
+            c.execute("ANALYZE")
+            set_setting(c, "analyze_count", str(n))
+            c.commit()
+            return True
+        return False
+    finally:
+        if own:
+            c.close()
+
 
 def get_setting(conn, key: str, default: str | None = None) -> str | None:
     row = conn.execute(
@@ -650,34 +710,52 @@ def update_sync_state(conn, chat_id, last_msg_id):
 def upsert_message(conn, chat_id, msg_id, date, sender_id, sender_name,
                    text, has_media=0, edited=0, reply_to=None):
     """Insert/update one message, keeping the FTS index in sync incrementally
-    (never a full rebuild - external-content FTS5 supports row-level upkeep)."""
+    (never a full rebuild - external-content FTS5 supports row-level upkeep).
+
+    Fast path: the overwhelmingly common case is a NEW message during
+    backfill/incremental sync - one INSERT (no pre-SELECT) plus one FTS
+    insert. The update path only runs for existing rows, and only
+    rewrites the FTS entry when the normalized text actually changed
+    (day-rescans re-fetch unchanged messages; churning their identical
+    FTS entries back and forth was pure write amplification)."""
     norm = normalize_text(text)
+    cur = conn.execute(
+        """INSERT INTO messages (chat_id, msg_id, date, sender_id, sender_name,
+                                 text, text_norm, has_media, edited, reply_to)
+           VALUES (?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(chat_id, msg_id) DO NOTHING""",
+        (chat_id, msg_id, date, sender_id, sender_name, text,
+         norm, has_media, edited, reply_to),
+    )
+    if cur.rowcount == 1:                       # brand-new row
+        conn.execute(
+            "INSERT INTO messages_fts(rowid, text_norm) VALUES (?, ?)",
+            (cur.lastrowid, norm),
+        )
+        return
+    # existing row: load it, update it, and only maintain the FTS entry
+    # when the normalized text differs from what is indexed
     row = conn.execute(
         "SELECT rowid, text_norm FROM messages WHERE chat_id=? AND msg_id=?",
         (chat_id, msg_id),
     ).fetchone()
-    if row is not None:  # update: drop the old index entry, then re-add
+    conn.execute(
+        """UPDATE messages SET date=?, sender_id=?, sender_name=?, text=?,
+             text_norm=?, has_media=?, edited=?, reply_to=?
+           WHERE chat_id=? AND msg_id=?""",
+        (date, sender_id, sender_name, text, norm, has_media, edited,
+         reply_to, chat_id, msg_id),
+    )
+    if (row["text_norm"] or "") != norm:
         conn.execute(
             "INSERT INTO messages_fts(messages_fts, rowid, text_norm) "
             "VALUES('delete', ?, ?)",
             (row["rowid"], row["text_norm"] or ""),
         )
-    cur = conn.execute(
-        """INSERT INTO messages (chat_id, msg_id, date, sender_id, sender_name,
-                                 text, text_norm, has_media, edited, reply_to)
-           VALUES (?,?,?,?,?,?,?,?,?,?)
-           ON CONFLICT(chat_id, msg_id) DO UPDATE SET
-             date=excluded.date, sender_id=excluded.sender_id,
-             sender_name=excluded.sender_name, text=excluded.text,
-             text_norm=excluded.text_norm, has_media=excluded.has_media,
-             edited=excluded.edited, reply_to=excluded.reply_to""",
-        (chat_id, msg_id, date, sender_id, sender_name, text,
-         norm, has_media, edited, reply_to),
-    )
-    conn.execute(
-        "INSERT INTO messages_fts(rowid, text_norm) VALUES (?, ?)",
-        (row["rowid"] if row is not None else cur.lastrowid, norm),
-    )
+        conn.execute(
+            "INSERT INTO messages_fts(rowid, text_norm) VALUES (?, ?)",
+            (row["rowid"], norm),
+        )
 
 
 def reindex_fts(conn):
@@ -726,10 +804,20 @@ def search(conn, phrases, chat_ids=None, sender=None,
     require_all  - True: AND all phrases. False: OR, more matches = higher rank.
     bookmarked   - True: only bookmarked messages. False/None: all messages.
     min_msg_id   - only messages with msg_id > this (incremental pipelines).
+    Structure (v9, measured -51% on high-hit queries at 500k rows): rank
+    the FTS matches in a subquery with ALL row-level filters applied
+    (so the LIMIT keeps the meaning it always had), and only then join
+    messages/chats/bookmarks for the <=limit rows that survive. The
+    previous shape joined three tables for every single match before
+    ranking. Result sets are identical; see
+    docs/engineering/OPTIMIZATION_REPORT.md.
     """
     # Trigram tokenizer requires >= 3 chars per phrase; drop shorter ones.
-    norm = [normalize_text(p) for p in phrases
-            if len(normalize_text(p).replace(" ", "")) >= 3]
+    norm = []
+    for p in phrases:
+        n = normalize_text(p)
+        if len(n.replace(" ", "")) >= 3:
+            norm.append(n)
     if not norm:
         return []
 
@@ -738,45 +826,138 @@ def search(conn, phrases, chat_ids=None, sender=None,
     else:
         match_expr = " OR ".join(fts_quote(p) for p in norm)
 
-    query = """
+    inner_where = ["messages_fts MATCH ?", "c.tracked = 1"]
+    params = [match_expr]
+    if chat_ids:
+        marks = ",".join("?" * len(chat_ids))
+        inner_where.append(f"m.chat_id IN ({marks})")
+        params.extend(chat_ids)
+    if sender:
+        inner_where.append("m.sender_name = ?")
+        params.append(sender)
+    if date_from:
+        inner_where.append("m.date >= ?")
+        params.append(_expand_date(date_from))
+    if date_to:
+        inner_where.append("m.date <= ?")
+        params.append(_expand_date(date_to, end=True))
+    if min_msg_id is not None:
+        inner_where.append("m.msg_id > ?")
+        params.append(int(min_msg_id))
+    if bookmarked:
+        # EXISTS, not a JOIN: no dedup surprises, and the probe only runs
+        # when the user is explicitly filtering to starred messages.
+        inner_where.append(
+            "EXISTS (SELECT 1 FROM bookmarks b WHERE b.chat_id = m.chat_id "
+            "AND b.msg_id = m.msg_id)")
+    params.append(limit)
+
+    query = f"""
         SELECT m.chat_id, m.msg_id, m.date, m.sender_id, m.sender_name,
                m.text, m.has_media, m.edited, c.title AS chat_title,
                c.username AS chat_username,
                (b.chat_id IS NOT NULL) AS bookmarked, b.note AS bookmark_note,
-               bm25(messages_fts) AS rank
-        FROM messages_fts
-        JOIN messages m ON m.rowid = messages_fts.rowid
+               f.rank AS rank
+        FROM (
+            SELECT m.rowid AS rid, bm25(messages_fts) AS rank
+            FROM messages_fts
+            JOIN messages m ON m.rowid = messages_fts.rowid
+            JOIN chats c   ON c.chat_id = m.chat_id
+            WHERE {" AND ".join(inner_where)}
+            ORDER BY rank
+            LIMIT ?
+        ) f
+        JOIN messages m ON m.rowid = f.rid
         JOIN chats c   ON c.chat_id = m.chat_id
         LEFT JOIN bookmarks b
                ON b.chat_id = m.chat_id AND b.msg_id = m.msg_id
-        WHERE messages_fts MATCH ? AND c.tracked = 1
+        ORDER BY rank
     """
-    params = [match_expr]
-
-    if chat_ids:
-        marks = ",".join("?" * len(chat_ids))
-        query += f" AND m.chat_id IN ({marks})"
-        params.extend(chat_ids)
-    if sender:
-        query += " AND m.sender_name = ?"
-        params.append(sender)
-    if date_from:
-        query += " AND m.date >= ?"
-        params.append(_expand_date(date_from))
-    if date_to:
-        query += " AND m.date <= ?"
-        params.append(_expand_date(date_to, end=True))
-    if bookmarked:
-        query += " AND b.chat_id IS NOT NULL"
-    if min_msg_id is not None:
-        query += " AND m.msg_id > ?"
-        params.append(int(min_msg_id))
-
-    query += " ORDER BY rank LIMIT ?"
-    params.append(limit)
-
     rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
+
+
+def search_diverse(conn, phrases, date_from=None, date_to=None, limit=200):
+    """Round-robin FTS search across ALL tracked chats (Ask-AI retrieval:
+    a huge group must not drown out smaller ones) in ONE query instead of
+    one full ranked search per chat.
+
+    Semantics match the old per-chat loop exactly: per chat, the best-
+    ranked `limit` matches; chats then interleave rank-position by
+    rank-position (chat A's best, chat B's best, ..., then the 2nds).
+    Returns at most `limit` rows overall.
+    """
+    norm = []
+    for p in phrases:
+        n = normalize_text(p)
+        if len(n.replace(" ", "")) >= 3:
+            norm.append(n)
+    if not norm:
+        return []
+    match_expr = " OR ".join(fts_quote(p) for p in norm)
+
+    inner_where = ["messages_fts MATCH ?", "c.tracked = 1"]
+    params = [match_expr]
+    if date_from:
+        inner_where.append("m.date >= ?")
+        params.append(_expand_date(date_from))
+    if date_to:
+        inner_where.append("m.date <= ?")
+        params.append(_expand_date(date_to, end=True))
+
+    query = f"""
+        SELECT m.chat_id, m.msg_id, m.date, m.sender_id, m.sender_name,
+               m.text, m.has_media, m.edited, c.title AS chat_title,
+               c.username AS chat_username,
+               (b.chat_id IS NOT NULL) AS bookmarked, b.note AS bookmark_note,
+               f.rank AS rank, f.rn AS rn
+        FROM (
+            SELECT rid, chat_id, rank,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY chat_id
+                       ORDER BY rank) AS rn
+            FROM (
+                SELECT m.rowid AS rid, m.chat_id,
+                       bm25(messages_fts) AS rank
+                FROM messages_fts
+                JOIN messages m ON m.rowid = messages_fts.rowid
+                JOIN chats c   ON c.chat_id = m.chat_id
+                WHERE {" AND ".join(inner_where)}
+            )
+        ) f
+        JOIN messages m ON m.rowid = f.rid
+        JOIN chats c   ON c.chat_id = m.chat_id
+        LEFT JOIN bookmarks b
+               ON b.chat_id = m.chat_id AND b.msg_id = m.msg_id
+        WHERE f.rn <= ?
+        ORDER BY rank
+    """
+    params.append(limit)
+    rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+
+    # interleave per chat (rank position 1 of every chat, then 2, ...)
+    by_chat: dict = {}
+    for r in rows:
+        by_chat.setdefault(r["chat_id"], []).append(r)
+    for lst in by_chat.values():
+        lst.sort(key=lambda r: r["rn"])
+    merged: list = []
+    i = 1
+    while len(merged) < limit:
+        added = False
+        for cid in sorted(by_chat):
+            lst = by_chat[cid]
+            if len(lst) >= i:
+                merged.append(lst[i - 1])
+                added = True
+                if len(merged) >= limit:
+                    break
+        if not added:
+            break
+        i += 1
+    for r in merged:
+        r.pop("rn", None)
+    return merged
 
 
 def browse(conn, chat_ids=None, sender=None, date_from=None, date_to=None,
@@ -790,9 +971,13 @@ def browse(conn, chat_ids=None, sender=None, date_from=None, date_to=None,
     Returns (rows, next_cursor, has_more).
     """
     desc = sort != "asc"
+    # v9: text_norm is intentionally NOT selected - the UI never renders
+    # it and it roughly doubled every feed page's payload (measured
+    # 22.7 KB -> ~11 KB per 50-message page). Search uses the FTS index,
+    # not this column.
     query = """
         SELECT m.chat_id, m.msg_id, m.date, m.sender_id, m.sender_name,
-               m.text, m.text_norm, m.has_media, m.edited,
+               m.text, m.has_media, m.edited,
                c.title AS chat_title,
                c.username AS chat_username,
                (b.chat_id IS NOT NULL) AS bookmarked, b.note AS bookmark_note
@@ -827,13 +1012,13 @@ def browse(conn, chat_ids=None, sender=None, date_from=None, date_to=None,
         except ValueError:
             c_date = None
         if c_date is not None:
-            if desc:
-                query += (" AND (m.date < ? OR (m.date = ? AND (m.chat_id < ?"
-                          " OR (m.chat_id = ? AND m.msg_id < ?))))")
-            else:
-                query += (" AND (m.date > ? OR (m.date = ? AND (m.chat_id > ?"
-                          " OR (m.chat_id = ? AND m.msg_id > ?))))")
-            params.extend([c_date, c_date, c_chat, c_chat, c_msg])
+            # Row-value keyset comparison: lexicographically identical to
+            # the old chained-OR form, but a direct seek on the composite
+            # index (needs SQLite >= 3.15, 2015). Measured 0.08ms deep
+            # pages at 500k rows vs 760ms for the OR form.
+            op = "<" if desc else ">"
+            query += (f" AND (m.date, m.chat_id, m.msg_id) {op} (?, ?, ?)")
+            params.extend([c_date, c_chat, c_msg])
     order = "DESC" if desc else "ASC"
     query += (f" ORDER BY m.date {order}, m.chat_id {order}, m.msg_id {order}"
               " LIMIT ?")

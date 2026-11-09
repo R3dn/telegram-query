@@ -33,6 +33,21 @@ built `web/dist` is committed, so backend-only contributors can skip it).
    (`db._migrate`); never drop or silently rewrite user data.
 6. For UI work, match the existing design tokens (`web/src/design/`) —
    restrained palette, one accent, small radii, no gradients.
+7. **SQL/schema/perf changes need a benchmark run** —
+   `python scripts/benchmark.py seed|db|api --messages 500000` before and
+   after (a 500k-row run takes ~5 minutes and caught a 1,000× pagination
+   regression during v9). Record the delta in the PR. See
+   [docs/engineering/](docs/engineering/) for the baseline and reports.
+
+## Useful scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts/seed_demo.py` | synthetic demo archive (testing, screenshots) |
+| `scripts/mock_ai_server.py` | deterministic OpenAI-compatible fake for E2E |
+| `scripts/e2e_test.py` | full-journey E2E against a running app + mock provider |
+| `scripts/benchmark.py` | repeatable performance harness (5k/50k/500k rows) |
+| `scripts/backup_db.py` | online, consistent archive snapshot |
 
 ## Screenshots for visual changes
 

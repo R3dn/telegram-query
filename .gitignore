@@ -6,10 +6,14 @@ ROADMAP.md
 tg_session*
 *.session
 
-# databases (any location)
+# databases (any location) - includes bench + backup outputs under data/
 messages.db
 messages.db-*
 data/
+
+# engineering bench artifacts (benchmark JSON dumps; the reports in
+# docs/engineering/ are tracked, their raw data is reproducible)
+docs/engineering/*.json
 
 # python
 __pycache__/

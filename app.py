@@ -14,6 +14,7 @@ import contextlib
 import logging
 import os
 import threading
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -88,6 +89,15 @@ def _start_discover_backfill_if_needed():
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
+    # fresh start signals: a previous in-process instance's graceful
+    # shutdown must not cancel this one's jobs or leave the scheduler
+    # dead (uvicorn restarts, test harnesses, repeated lifespan runs)
+    try:
+        from sync import CANCEL
+        CANCEL.clear()
+    except ImportError:
+        pass
+    scheduler.reset()
     # check the Telegram session in the background (cheap, cached)
     threading.Thread(target=lambda: tg_auth.run(tg_auth.refresh_auth_state()),
                      daemon=True).start()
@@ -119,8 +129,43 @@ async def lifespan(app: FastAPI):
     # unless the user enabled it)
     if decisions.post_sync_hook not in jobs.POST_SYNC_HOOKS:
         jobs.POST_SYNC_HOOKS.append(decisions.post_sync_hook)
+    # v9: refresh SQLite planner statistics when the archive has grown
+    # substantially (doubling threshold - see db.analyze_if_stale)
+    if db.analyze_if_stale not in jobs.POST_SYNC_HOOKS:
+        jobs.POST_SYNC_HOOKS.append(db.analyze_if_stale)
     _start_discover_backfill_if_needed()
+    # Local-first posture: refuse to be silent about an unsafe bind
+    # (no auth protects this API - it serves the full archive).
+    host = config.settings.host
+    if host and host not in ("127.0.0.1", "localhost", "::1"):
+        log.warning(
+            "HOST=%s: the API serves your complete message archive with NO "
+            "authentication. Bind to a loopback address unless you have "
+            "put an auth proxy in front (see docs/engineering/"
+            "PRODUCTION_DEPLOYMENT.md).", host)
     yield
+    # graceful shutdown: ask the running job to stop at its next
+    # checkpoint and give it a moment to save progress. SQLite
+    # checkpoints make a hard kill safe too - this is courtesy, not a
+    # correctness requirement.
+    try:
+        from sync import CANCEL
+        CANCEL.set()
+    except ImportError:
+        CANCEL = None
+    scheduler.stop()
+    for _ in range(20):
+        with jobs.JOBS.lock:
+            if not jobs.JOBS.running:
+                break
+        time.sleep(0.25)
+    # leave the module in a clean state for the next in-process
+    # instance (test harnesses, embedded usage): the job either saw the
+    # cancel and checkpointed, or the wait timed out - either way a
+    # fresh instance must not inherit "cancelled" state
+    if CANCEL is not None:
+        CANCEL.clear()
+    scheduler.reset()
 
 
 app = FastAPI(title="Telegram Query", version=config.__version__,
@@ -167,14 +212,26 @@ async def host_guard(request: Request, call_next):
             {"error": "This app only accepts requests addressed to the "
                       "local machine."},
             status_code=403)
-    return await call_next(request)
+    resp = await call_next(request)
+    path = request.url.path
+    if path.startswith("/assets/"):
+        # hashed filenames: safe to cache forever; a new build gets new URLs
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    # modest hardening; nothing in this app needs to be framed or sniffed
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    return resp
 
 
 @app.get("/")
 def index():
-    """Serve the built React app."""
+    """Serve the built React app. No-cache so a new build's hashed asset
+    names are picked up immediately (the assets themselves are immutable)."""
     if (WEB_DIST / "index.html").exists():
-        return FileResponse(WEB_DIST / "index.html")
+        return FileResponse(
+            WEB_DIST / "index.html",
+            headers={"Cache-Control": "no-cache"})
     return JSONResponse(
         {"error": "Frontend build missing - run: cd web && npm install && npm run build"},
         status_code=500)

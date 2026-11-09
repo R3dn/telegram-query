@@ -42,11 +42,12 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
-  const data = await r.json().catch(() => null);
   if (!r.ok) {
-    const msg = (data && (data.error ?? data.detail)) ?? `request failed (${r.status})`;
+    const err = await r.json().catch(() => null);
+    const msg = (err && (err.error ?? err.detail)) ?? `request failed (${r.status})`;
     throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
   }
+  const data = await r.json().catch(() => null);
   return data as T;
 }
 
@@ -93,7 +94,7 @@ export const api = {
   messages: (p: {
     groups: number[]; sender?: string; from?: string; to?: string;
     media?: string; cursor?: string; limit?: number; sort?: string;
-    bookmarked?: boolean;
+    bookmarked?: boolean; signal?: AbortSignal;
   }): Promise<FeedPage> => {
     const q = new URLSearchParams();
     if (p.groups.length) q.set("groups", p.groups.join(","));
@@ -105,13 +106,13 @@ export const api = {
     if (p.bookmarked) q.set("bookmarked", "true");
     q.set("limit", String(p.limit ?? 50));
     q.set("sort", p.sort ?? "desc");
-    return req<FeedPage>(`/api/messages?${q}`);
+    return req<FeedPage>(`/api/messages?${q}`, { signal: p.signal });
   },
   message: (chatId: number, msgId: number) =>
     req<Message>(`/api/message/${chatId}/${msgId}`),
   search: (p: {
     q: string; groups: number[]; sender?: string; from?: string; to?: string;
-    limit?: number; bookmarked?: boolean;
+    limit?: number; bookmarked?: boolean; signal?: AbortSignal;
   }): Promise<Message[]> => {
     const q = new URLSearchParams({ q: p.q });
     if (p.groups.length) q.set("groups", p.groups.join(","));
@@ -120,7 +121,7 @@ export const api = {
     if (p.to) q.set("to", p.to);
     if (p.bookmarked) q.set("bookmarked", "true");
     q.set("limit", String(p.limit ?? 200));
-    return req<Message[]>(`/api/search?${q}`);
+    return req<Message[]>(`/api/search?${q}`, { signal: p.signal });
   },
 
   // ai

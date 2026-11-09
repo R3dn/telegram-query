@@ -10,7 +10,9 @@ Pipeline (keyword + retry):
 Provider: any OpenAI-compatible chat-completions endpoint (see config.py).
 Retrieved message excerpts ARE sent to the configured endpoint.
 """
+import contextlib
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 
 from openai import OpenAI
@@ -66,23 +68,71 @@ def is_configured():
 # Provider calls must never hang the UI thread for minutes.
 PROVIDER_TIMEOUT_S = 90
 
+# v9: connection reuse. A process-level client (one httpx pool) is kept
+# keyed on (api_key, base_url); the setup wizard's config update reloads
+# settings, and the next call sees a changed key -> builds a fresh client
+# and closes the old one. Previously every ask (and every ai_tasks retry
+# attempt) paid full client construction + connection setup.
+_CLIENT_CACHE: dict = {"key": None, "client": None}
+
 
 def get_client():
-    return OpenAI(
-        api_key=config.settings.ai_api_key,
-        base_url=config.settings.ai_base_url or None,
-        timeout=PROVIDER_TIMEOUT_S,
-    )
+    key = (config.settings.ai_api_key, config.settings.ai_base_url)
+    if _CLIENT_CACHE["client"] is None or _CLIENT_CACHE["key"] != key:
+        old = _CLIENT_CACHE["client"]
+        _CLIENT_CACHE["client"] = OpenAI(
+            api_key=key[0],
+            base_url=key[1] or None,
+            timeout=PROVIDER_TIMEOUT_S,
+        )
+        _CLIENT_CACHE["key"] = key
+        if old is not None:
+            try:
+                old.close()
+            except Exception:  # noqa: BLE001 - eviction never raises
+                pass
+    return _CLIENT_CACHE["client"]
+
+
+# v9: bound concurrent provider calls. Sync request handlers run in a
+# fixed threadpool; without this, a burst of asks could occupy every
+# thread with 90s-timeout provider calls and starve the whole app.
+_SEMAPHORE: dict = {"size": 0, "sem": None}
+
+
+class AIBusyError(Exception):
+    """The local AI concurrency limit is saturated; retry shortly."""
+
+
+@contextlib.contextmanager
+def _provider_slot():
+    size = config.settings.ai_max_concurrency
+    if _SEMAPHORE["size"] != size or _SEMAPHORE["sem"] is None:
+        _SEMAPHORE["sem"] = threading.Semaphore(size)
+        _SEMAPHORE["size"] = size
+    sem = _SEMAPHORE["sem"]
+    if not sem.acquire(timeout=PROVIDER_TIMEOUT_S):
+        raise AIBusyError(
+            f"The AI layer is busy (limit {size} concurrent request(s)) - "
+            "try again in a moment.")
+    try:
+        yield
+    finally:
+        sem.release()
 
 
 def _chat(client, system, user, model=None):
-    resp = client.chat.completions.create(
-        model=model or config.settings.ai_model,
-        messages=[{"role": "system", "content": system},
-                  {"role": "user", "content": user}],
-        temperature=config.settings.ai_temperature,
-    )
-    return resp.choices[0].message.content
+    """One provider call. Returns (text, usage|None) so callers can
+    record real token counts when the provider reports them."""
+    with _provider_slot():
+        resp = client.chat.completions.create(
+            model=model or config.settings.ai_model,
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+            temperature=config.settings.ai_temperature,
+        )
+    usage = getattr(resp, "usage", None)
+    return resp.choices[0].message.content, usage
 
 
 def _parse_json(raw):
@@ -132,31 +182,18 @@ def _resolve_chat_ids(conn, titles):
 
 def _search_diverse(conn, kws, chat_ids=None, date_from=None, date_to=None, limit=200):
     """FTS search. Without an explicit chat filter, hits are round-robined
-    across tracked chats so a huge group can't drown out smaller ones."""
+    across tracked chats so a huge group can't drown out smaller ones.
+
+    v9: the round-robin runs over ONE ranked query with a per-chat
+    ROW_NUMBER window (db.search_diverse) instead of one full FTS
+    search per chat - identical interleave semantics, N-times-less
+    query work."""
     if chat_ids or len(db.get_tracked_chats(conn)) <= 1:
         return db.search(conn, kws, chat_ids=chat_ids,
                          date_from=date_from, date_to=date_to,
                          require_all=False, limit=limit)
-    per_chat = []
-    for c in db.get_tracked_chats(conn):
-        rows = db.search(conn, kws, chat_ids=[c["chat_id"]],
-                         date_from=date_from, date_to=date_to,
-                         require_all=False, limit=limit)
-        per_chat.append(rows)
-    merged = []
-    i = 0
-    while len(merged) < limit:
-        added = False
-        for rows in per_chat:
-            if i < len(rows):
-                merged.append(rows[i])
-                added = True
-                if len(merged) >= limit:
-                    break
-        if not added:
-            break
-        i += 1
-    return merged
+    return db.search_diverse(conn, kws, date_from=date_from,
+                             date_to=date_to, limit=limit)
 
 
 def _format_messages(rows, max_chars=400):
@@ -219,6 +256,18 @@ def ask(conn, question, max_results=None, scope=None):
     best_rows = []     # rows from the most successful attempt
     attempts = 0
     spec = None
+    provider_calls = 0
+    tokens_in = tokens_out = 0
+
+    def _tracked_chat(system, user, role):
+        nonlocal provider_calls, tokens_in, tokens_out
+        raw, usage = _chat(client, system, user, model=config.settings.model_for(role))
+        provider_calls += 1
+        tin = getattr(usage, "prompt_tokens", None)
+        tout = getattr(usage, "completion_tokens", None)
+        tokens_in += tin if tin else len(system) // 4 + len(user) // 4
+        tokens_out += tout if tout else (len(raw) // 4 if raw else 0)
+        return raw
 
     while attempts <= 2:  # initial + 2 retries
         attempts += 1
@@ -232,8 +281,7 @@ def ask(conn, question, max_results=None, scope=None):
                     f"Keyword sets already tried: {prev}\n"
                     f"Results found so far: {len(best_rows)}")
 
-        raw = _chat(client, system, user,
-                    model=config.settings.model_for("extract"))
+        raw = _tracked_chat(system, user, "extract")
         spec = _parse_json(raw) or {}
         kws = [k for k in (spec.get("keywords") or []) if k and k.strip()]
         if not kws:
@@ -294,14 +342,16 @@ def ask(conn, question, max_results=None, scope=None):
         )
     else:
         user_msg = f"Today: {today}\n\nQuestion: {question}\n\nMessages:\n{context}"
-    answer = _chat(client, SYSTEM_ANSWER, user_msg,
-                   model=config.settings.model_for("synth"))
-    # usage accounting for the ask pipeline (requests; tokens when reported)
+    answer = _tracked_chat(SYSTEM_ANSWER, user_msg, "synth")
+    # usage accounting for the ask pipeline: real tokens when the
+    # provider reports them, honest estimates otherwise (v9: the ask
+    # pipeline previously recorded tokens as None even when reported)
     try:
         import ai_tasks
         uconn = db.get_db()
         try:
-            ai_tasks.record_usage(uconn, "ask", attempts + 1, None, None,
+            ai_tasks.record_usage(uconn, "ask", provider_calls,
+                                  tokens_in or None, tokens_out or None,
                                   config.settings.model_for("synth"))
             uconn.commit()
         finally:

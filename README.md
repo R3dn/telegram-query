@@ -158,6 +158,7 @@ automatically). Full reference: [docs/configuration.md](docs/configuration.md).
 | `AI_MODEL_SYNTH` | falls back to `AI_MODEL` | Model for answers, briefs, digests, timelines |
 | `AI_MODEL_EMBED` | falls back to `AI_MODEL` | Reserved for the (benchmark-gated) hybrid retrieval |
 | `TGQ_AI_DAILY_CAP` | `0` (off) | Max AI requests per UTC day — honest errors when reached, deterministic features unaffected |
+| `TGQ_AI_MAX_CONCURRENCY` | `4` | Max provider requests in flight; extra asks wait, then fail honestly |
 | `TGQ_GROUPS_HINT` | — | Optional community description to sharpen keyword extraction |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | Local bind address — keep it local |
 
@@ -172,7 +173,16 @@ with WAL, an FTS5 trigram external-content index maintained incrementally,
 and a single-slot job runner so the Telegram session is never used
 concurrently.
 
-Details: [docs/architecture.md](docs/architecture.md).
+Details: [docs/architecture.md](docs/architecture.md). Engineering docs
+(audit, performance baseline, optimization report, security review,
+deployment/DB runbooks, feature guide):
+[docs/engineering/](docs/engineering/).
+
+## Operations
+
+- **Backup** (online, consistent snapshot): `python scripts/backup_db.py`
+- **Benchmarks** (repeatable perf harness): `python scripts/benchmark.py seed|db|api --messages 500000`
+- **Health**: `GET /api/health` (liveness) · `GET /api/health/ready` (readiness)
 
 ## Development
 

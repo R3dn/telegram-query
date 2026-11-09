@@ -177,3 +177,52 @@ over the small clustered set, keeping the query portable across
 SQLite builds. Frontend focus plumbing (`evidenceFocus`) lets any
 back-reference jump to its record and expand it without per-view
 custom state.
+
+## 0009 — Performance work must be index-satisfiable, measured, and honest (2026-11-10)
+
+**Decision.** The v0.9 engineering pass establishes four rules for the
+database and provider layers:
+
+1. **Hot read paths are index-satisfiable by construction, not by
+   planner luck.** Keyset pagination walks a composite
+   `(date, chat_id, msg_id)` index with a row-value cursor comparison
+   — a plan that cannot regress regardless of statistics (ANALYZE
+   once made the old shape pick a 1,000× worse plan, caught only
+   because the benchmark was re-run). Sender and reply lookups got
+   dedicated `(chat_id, sender_name)` / `(chat_id, reply_to)`
+   indexes; a bare `(sender_name)` index was measured and **rejected**
+   (6.6× worse on the filtered case). The redundant `(date)` index
+   was replaced, not added to.
+2. **Search keeps exact semantics under optimization.** Ranking runs
+   in a subquery with *all* filters applied before the LIMIT, and
+   display joins happen afterward — result sets are provably
+   identical and test-pinned. A −51% variant that could return fewer
+   rows for archives with untracked chats was rejected; the honest
+   shipped number is −5–10% on high-hit queries.
+3. **Planner statistics are maintained, not hoped for.** `ANALYZE`
+   runs once in the v9 migration and after syncs on a doubling
+   threshold (`db.analyze_if_stale`, 0.33 s at 500k rows).
+4. **The provider layer is one cached client with bounded
+   concurrency** (`TGQ_AI_MAX_CONCURRENCY`, default 4) and honest
+   503s when saturated; clients rebuild when settings change. The
+   raw DB ingestion trade (9.7k → 3.4k msg/s at 500k rows for the
+   two read indexes) is accepted knowingly: real Telegram ingestion
+   is network-bound at ~50–2,000 msg/s, so the archive write path
+   keeps 2–17× headroom while every interactive path got 2–100×
+   faster.
+
+**Context.** A full audit and a repeatable benchmark harness
+(`scripts/benchmark.py`, 5k/50k/500k deterministic archives through the
+real ingestion path) existed before any optimization was written, and
+every claim above was measured before and after. The harness caught two
+regressions during development (the ANALYZE plan flip; a shutdown-state
+leak across app instances found by the test suite).
+
+**Consequences.** Schema v9 migrations are additive except the
+prefix-compatible index replacement; `scripts/benchmark.py` is now a
+required gate for SQL/schema changes; `scripts/backup_db.py` +
+`docs/engineering/DATABASE_OPERATIONS.md` make backups and restores a
+procedure instead of an aspiration; future features inherit the
+measure-first doctrine (see
+[docs/engineering/FEATURE_DEVELOPMENT_GUIDE.md](../engineering/FEATURE_DEVELOPMENT_GUIDE.md)
+§8).

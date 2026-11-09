@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import sys
 import threading
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -44,6 +45,7 @@ class SyncArgs:
     interactive: bool = False
     login_interactive: bool = True   # False when run from the web app
     login: bool = False
+    force: bool = False              # CLI only: run beside a live app
 
 
 def need_creds():
@@ -78,6 +80,18 @@ async def connect_client(client: TelegramClient, login_interactive: bool) -> Tel
             "Telegram account is not authenticated. Log in from the web app "
             "or run: python sync.py --login")
     return client
+
+
+def _app_running() -> bool:
+    """Is the web app (this same installation) serving right now? Cheap
+    local probe of the health endpoint (no credentials cross the wire)."""
+    try:
+        url = (f"http://{config.settings.host}:{config.settings.port}"
+               "/api/health")
+        with urllib.request.urlopen(url, timeout=0.8) as r:
+            return getattr(r, "status", None) == 200
+    except Exception:  # noqa: BLE001 - any failure means "not running"
+        return False
 
 
 def sender_name(msg) -> str:
@@ -132,7 +146,8 @@ async def iter_with_flood_retry(client, chat, **kwargs):
 
 
 async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=True):
-    """Sync one chat.
+    """Sync one chat. Returns True when the chat processed without an
+    error, False otherwise (failed resolution or a fetch error).
 
     days=N        - re-fetch ALL messages from the last N days (catches edits)
     incremental   - fetch messages newer than the last synced message ID
@@ -157,7 +172,7 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
                   f"python sync.py --untrack {chat_id}")
         else:
             print(f"[{title}] skipped - could not resolve the chat ({e})")
-        return
+        return False
     title = getattr(chat, "title", "") or str(chat_id)
     if isinstance(chat, User):
         kind = "user"
@@ -173,6 +188,8 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
     if full:
         floor = 0
     count = 0
+    ok = True   # flipped to False on a fetch error (v9: a failed sync must
+                # not be reported to the scheduler as a successful one)
     since = (datetime.now(timezone.utc) - timedelta(days=days)) if days else None
 
     def tick():
@@ -237,12 +254,14 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
                 print(f"[{title}] full backfill ...")
                 await run_backfill()
     except Exception as e:
+        ok = False
         print(f"  error: {e}")
 
     db.update_sync_state(conn, chat_id, newest_id)
     conn.commit()
     total = conn.execute("SELECT COUNT(*) c FROM messages").fetchone()["c"]
     print(f"[{title}] {count} messages processed, DB total: {total}")
+    return ok
 
 
 async def list_chats(client, conn):
@@ -296,6 +315,13 @@ async def interactive_track(client, conn):
 async def run(args: SyncArgs):
     need_creds()
     db.init_db()
+    if args.login_interactive and _app_running() and not args.force:
+        print("The Telegram Query web app appears to be running "
+              f"(http://{config.settings.host}:{config.settings.port}).")
+        print("Two processes must not share one Telegram session - the app's")
+        print("own scheduler/sync would race this CLI run. Stop the app, or")
+        print("use the app's UI (or --force to accept the risk).")
+        sys.exit(2)
     conn = db.get_db()
     client = make_client(login_interactive=args.login_interactive)
     await connect_client(client, args.login_interactive)
@@ -334,12 +360,23 @@ async def run(args: SyncArgs):
                 print("No tracked chats yet. Choose groups:")
                 await interactive_track(client, conn)
                 chats = db.get_tracked_chats(conn)
+            outcomes = []
             for chat in chats:
                 if CANCEL.is_set():
                     print("Cancelled - remaining chats skipped.")
                     break
-                await sync_chat(client, conn, chat["chat_id"],
-                                full=args.full, days=args.days)
+                outcomes.append(await sync_chat(
+                    client, conn, chat["chat_id"],
+                    full=args.full, days=args.days))
+            # v9: honest failure propagation. A sync where EVERY chat
+            # failed is a failed sync: the job runner marks the job as
+            # failed and the scheduler stops recording a bogus
+            # last_success. Partial failures stay per-chat warnings -
+            # one dead group must not fail an otherwise good sync.
+            if chats and outcomes and not any(outcomes):
+                raise RuntimeError(
+                    f"all {len(chats)} tracked chat(s) failed to sync - "
+                    "see the job log above (network? session? flood?)")
     finally:
         await client.disconnect()
         conn.close()
@@ -360,10 +397,14 @@ def main():
                     help="pick groups to track interactively")
     ap.add_argument("--login", action="store_true",
                     help="log in to Telegram interactively, then exit")
+    ap.add_argument("--force", action="store_true",
+                    help="run even when the web app appears to be running "
+                         "(two processes sharing one Telegram session can "
+                         "invalidate it)")
     ns = ap.parse_args()
     args = SyncArgs(list=ns.list, track=ns.track, untrack=ns.untrack,
                     full=ns.full, days=ns.days, interactive=ns.interactive,
-                    login_interactive=True, login=ns.login)
+                    login_interactive=True, login=ns.login, force=ns.force)
 
     need_creds()
     db.init_db()

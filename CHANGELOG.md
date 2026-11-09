@@ -5,6 +5,75 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-10
+
+Production readiness & performance engineering pass. Every change is
+measured in `docs/engineering/` (audit → baseline → optimization →
+validation). Schema migration v8 → v9 (additive; replaces one redundant
+index with a prefix-compatible composite and refreshes planner stats).
+No API contract changed; two endpoints and one env var were added.
+
+### Added
+- **Health/ready split**: `GET /api/health/ready` (readiness — checks
+  the archive DB; optional dependencies are informational and can never
+  fail it) alongside the dependency-free `GET /api/health` liveness.
+- **`TGQ_AI_MAX_CONCURRENCY`** (default 4): bounds provider requests in
+  flight; saturated asks wait up to the request timeout, then get an
+  honest 503. Protects the request threadpool from provider-latency
+  pile-ups.
+- **`scripts/backup_db.py`**: online, consistent, compacted snapshots
+  (`VACUUM INTO`) with retention; restore procedure documented in
+  `docs/engineering/DATABASE_OPERATIONS.md`.
+- **`scripts/benchmark.py`**: repeatable performance harness (real
+  ingestion path, direct DB queries with plans, real-app HTTP latency
+  P50/P95/P99 + throughput + RSS) at 5k/50k/500k-row scales. Caught a
+  1,000× pagination regression during development — now a standard
+  gate for SQL/schema changes.
+- **Graceful shutdown**: running jobs are cancelled at their checkpoint
+  (≤5 s wait), and module state is left clean for the next instance.
+- **CLI sync guard**: `python sync.py` refuses to share the Telegram
+  session with a running web app (`--force` to override).
+- Static assets served with `Cache-Control: immutable` (hashed names),
+  `no-cache` index, and `nosniff` / `X-Frame-Options` / `Referrer-Policy`
+  response headers. Non-loopback `HOST` logs a loud warning at startup.
+- Real token usage recorded for the Ask-AI pipeline (was `None` even
+  when providers report usage).
+- **docs/engineering/**: architecture audit, performance baseline,
+  optimization report, feature development guide, security review,
+  production deployment guide, database operations runbook.
+
+### Changed
+- **Schema v9** — keyset pagination is index-satisfiable by
+  construction: new composite `(date, chat_id, msg_id)` index with
+  row-value cursors, plus `(chat_id, sender_name)` and `(chat_id,
+  reply_to)` indexes; planner statistics (ANALYZE) refresh after syncs
+  on a doubling threshold. Measured at 500k rows: groups 150→22 ms,
+  senders 283→148 ms (filtered 110→39), conversation 14→3 ms,
+  deep pages 64% faster; ingestion of identical messages no longer
+  churns the FTS index (zero FTS writes on day-rescans).
+- **Search** ranks in a subquery with all filters applied before the
+  LIMIT and joins only afterward (result sets identical; pinned by
+  tests). Ask-AI retrieval runs one ranked window-function query per
+  attempt instead of one full search per tracked chat.
+- **WAL `synchronous=NORMAL`** + 8 MB page cache per connection.
+- Provider client is cached process-wide (rebuilt when settings change)
+  instead of per ask / per retry attempt.
+- Browse pages no longer ship `text_norm` (no consumer anywhere) —
+  ~21% smaller feed payloads.
+- Frontend cancels superseded feed/search requests (AbortController)
+  and debounces the senders fetch.
+- All syncs-failed is now an honest job failure (the scheduler no
+  longer records a bogus `last_success`); a `--days`-rescan that hits
+  errors can't silently report success.
+- Dependency floors gained majors-only upper bounds (the installed set
+  — fastapi 0.141 / openai 3.x / telethon 1.45 — is what CI tests).
+
+### Fixed
+- Sync chat failures no longer update `last_synced`/report success when
+  every tracked chat failed.
+- E2E version assertion compared against a stale constant instead of
+  `config.__version__`.
+
 ## [0.8.1] - 2026-11-09
 
 Completes the v0.8.0 P0 track: open decisions are watched

@@ -101,6 +101,7 @@ def _estimate_tokens(text: str) -> int:
 
 def _call_with_retry(system, user, model):
     """Provider call with exponential backoff + jitter. Never fabricates."""
+    import ai as ai_module
     last_exc = None
     for attempt in range(PROVIDER_ATTEMPTS):
         if attempt:
@@ -108,7 +109,13 @@ def _call_with_retry(system, user, model):
                         + random.uniform(0, 0.3))
             time.sleep(delay)
         try:
-            return _chat_json(_get_client(), system, user, model)
+            with ai_module._provider_slot():
+                text, usage = _chat_json(_get_client(), system, user, model)
+            return text, usage
+        except ai_module.AIBusyError:
+            raise TaskError(
+                "The AI layer is busy with other requests - try again "
+                "in a moment.") from None
         except Exception as e:  # noqa: BLE001 - retried below if transient
             if _is_rate_limit(e) and attempt < PROVIDER_ATTEMPTS - 1:
                 last_exc = e

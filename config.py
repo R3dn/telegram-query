@@ -24,7 +24,7 @@ load_dotenv(APP_ROOT / ".env")
 
 ENV_FILE = APP_ROOT / ".env"   # written by the setup wizard; tests redirect this
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 
 
 def _env(*names: str, default: str = "") -> str:
@@ -95,6 +95,10 @@ class Settings:
     # 0 = unlimited; >0 caps total AI requests per UTC day (honest errors
     # when reached - deterministic features are never affected)
     ai_daily_cap: int
+    # Max provider requests in flight at once (protects the request
+    # threadpool from being fully occupied by long AI calls; queued
+    # asks wait, then fail honestly when the timeout elapses)
+    ai_max_concurrency: int
 
     # search normalization: "standard" (v0.3 rules) or "extended"
     # (Arabic-Indic digits, elongation collapse, Arabizi folding, Gulf
@@ -167,6 +171,8 @@ def load_settings() -> Settings:
         ai_model_synth=_env("AI_MODEL_SYNTH"),
         ai_model_embed=_env("AI_MODEL_EMBED"),
         ai_daily_cap=max(0, int(_env("TGQ_AI_DAILY_CAP", default="0"))),
+        ai_max_concurrency=max(1, int(_env("TGQ_AI_MAX_CONCURRENCY",
+                                           default="4"))),
         normalization_level=_env("NORMALIZATION", default="extended").strip().lower(),
     )
 

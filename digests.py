@@ -66,10 +66,15 @@ def _period(now=None, frequency="daily"):
 
 
 def _top_terms(rows, n=12):
-    """Deterministic theme hints: most frequent significant words."""
+    """Deterministic theme hints: most frequent significant words.
+
+    v9: normalizes on the fly (browse rows no longer carry text_norm -
+    it doubled every feed page's payload for zero UI value). Digests
+    run as background jobs over <=MAX_MESSAGES rows, so the tiny
+    recompute is free here; identical normalization, identical output."""
     counts = Counter()
     for r in rows:
-        for w in (r["text_norm"] or "").split():
+        for w in db.normalize_text(r["text"] or "").split():
             if len(w) >= 4 and w not in _STOPWORDS and not w.isdigit():
                 counts[w] += 1
     return [t for t, _ in counts.most_common(n)]

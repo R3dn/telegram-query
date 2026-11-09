@@ -25,10 +25,26 @@ Telegram Query is a **single-user, local-first** application:
 - The Telegram session file and message database stay in your data
   directory and are gitignored.
 - All SQL is parameterized; message text is HTML-escaped before rendering.
+- Every response carries `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`; hashed
+  static assets are served cache-immutable and the app shell is
+  `no-cache` (v0.9).
+- A non-loopback bind (`HOST=...`) logs a loud startup warning, because
+  the API serves your complete archive with no authentication.
 - Ask-AI sends only the retrieved excerpts for the question you asked to
   the AI endpoint you configured — see [docs/privacy.md](docs/privacy.md).
   Archived messages are passed to the model strictly as data; the system
   prompt instructs the model to ignore any instructions embedded in them.
+- Provider calls are bounded (`TGQ_AI_MAX_CONCURRENCY`, default 4) and
+  carry an explicit 90 s timeout; AI cost can additionally be capped per
+  UTC day with `TGQ_AI_DAILY_CAP`.
+
+The full threat model, verified controls, and the mandatory
+pre-exposure checklist live in
+[docs/engineering/SECURITY_REVIEW.md](docs/engineering/SECURITY_REVIEW.md);
+operational hardening (readiness probes, graceful shutdown, single-process
+constraint, backups) is documented in
+[docs/engineering/PRODUCTION_DEPLOYMENT.md](docs/engineering/PRODUCTION_DEPLOYMENT.md).
 
 ## Trust boundaries
 
