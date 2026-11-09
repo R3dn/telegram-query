@@ -304,6 +304,62 @@ def test_rebuild_rebuilds_terms_and_questions(conn):
     assert discover.question_list(conn)  # radar recovered the open question
 
 
+def test_rebuild_saves_question_watermark(conn):
+    """v0.8.1 regression: the rebuild used a windowed scan that never
+    saved the questions watermark - the first sync after it then paid a
+    full-archive rescan that looked like a stuck job. Rebuild must leave
+    the watermark set so the next incremental pass sees nothing new."""
+    _seed_questions(conn)
+    # also verify the OLD pre-90-day messages are covered by a rebuild
+    db.upsert_message(conn, -1, 5, iso(120), 1, "a",
+                      "What lens is best for astrophotography?")
+    conn.commit()
+
+    r = discover.rebuild(conn, verbose=lambda *_: None)
+    assert r["questions"]["new_open"] >= 2  # recent + 120-day-old question
+
+    marks = json.loads(db.get_setting(
+        conn, "discover_questions_watermark", "{}") or "{}")
+    assert marks.get("-1") == 13, "rebuild owns the questions watermark"
+    # the next incremental pass is a no-op - nothing reprocessed
+    stats = discover.scan_questions(conn)
+    assert stats["scanned"] == 0
+
+
+def test_radar_stop_button_resumes_from_batch(conn, monkeypatch):
+    """The job Stop button interrupts the radar; the watermark keeps the
+    last fully processed batch, so a re-run resumes above it - nothing
+    skipped, nothing reprocessed."""
+    from datetime import datetime, timedelta, timezone
+
+    db.upsert_chat(conn, -1, "Q", "qgroup", "group")
+    base = datetime.now(timezone.utc) - timedelta(days=1)
+    for i in range(1, 2501):
+        db.upsert_message(conn, -1, i, base.isoformat(), 1, "a",
+                          f"question number {i} about lenses?")
+    conn.commit()
+
+    calls = {"n": 0}
+
+    def fake_cancel():
+        calls["n"] += 1
+        return calls["n"] > 2        # stop at the 3rd batch check
+
+    monkeypatch.setattr(discover, "_cancel_requested", fake_cancel)
+    stats = discover.scan_questions(conn)
+    assert stats["scanned"] == 2000, "two batches processed, then stopped"
+    marks = json.loads(db.get_setting(
+        conn, "discover_questions_watermark", "{}") or "{}")
+    assert marks["-1"] == 2000, "watermark sits at the batch boundary"
+
+    monkeypatch.setattr(discover, "_cancel_requested", lambda: False)
+    stats = discover.scan_questions(conn)
+    assert stats["scanned"] == 500, "resumed above 2000, finished the rest"
+    marks = json.loads(db.get_setting(
+        conn, "discover_questions_watermark", "{}") or "{}")
+    assert marks["-1"] == 2500
+
+
 # ---------------------------------------------------------------------------
 # API surface
 # ---------------------------------------------------------------------------

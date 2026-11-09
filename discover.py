@@ -367,6 +367,15 @@ def _reply_counts(conn, chat_id, msg_id, asked_at) -> tuple[int, int]:
     return n_replies, n_followers
 
 
+def _cancel_requested() -> bool:
+    """The job Stop button (sync.CANCEL) also interrupts the radar."""
+    try:
+        from sync import CANCEL
+        return CANCEL.is_set()
+    except ImportError:
+        return False
+
+
 def scan_questions(conn, chat_ids=None, days=None, verbose=print) -> dict:
     """Detect questions and record the unanswered ones.
 
@@ -375,6 +384,10 @@ def scan_questions(conn, chat_ids=None, days=None, verbose=print) -> dict:
     days=N     -> bounded window rescan (on-demand "scan recent"), which
                   only INSERTs questions that are not tracked yet - human
                   statuses are never overwritten.
+
+    Honors the job Stop button: a cancelled scan keeps the watermark at
+    the last fully processed batch, so the next run resumes exactly
+    above it (nothing reprocessed, nothing skipped).
     """
     stats = {"scanned": 0, "questions": 0, "new_open": 0, "auto_answered": 0}
     chats = chat_ids or [c["chat_id"] for c in db.get_tracked_chats(conn)]
@@ -384,7 +397,10 @@ def scan_questions(conn, chat_ids=None, days=None, verbose=print) -> dict:
         since = (_now() - timedelta(days=max(1, min(days, 90)))
                  ).strftime("%Y-%m-%d")
 
+    stopped = False
     for cid in chats:
+        if stopped:
+            break
         if since is not None:
             # window rescan: rewind to the newest message older than the
             # window (never below the real watermark - no reprocessing)
@@ -397,6 +413,9 @@ def scan_questions(conn, chat_ids=None, days=None, verbose=print) -> dict:
             floor = int(marks.get(str(cid), 0))
         last_seen = floor
         while True:
+            if _cancel_requested():
+                stopped = True
+                break
             rows = conn.execute(
                 "SELECT msg_id, date, text, reply_to FROM messages "
                 "WHERE chat_id=? AND msg_id > ? ORDER BY msg_id LIMIT 1000",
@@ -436,10 +455,18 @@ def scan_questions(conn, chat_ids=None, days=None, verbose=print) -> dict:
             last_seen = rows[-1]["msg_id"]
             conn.commit()
         if since is None:  # incremental mode owns the watermark
-            marks[str(cid)] = _max_msg_id(conn, cid)
+            if stopped:
+                # cancelled: mark the last fully processed batch, never
+                # the chat max - the next scan resumes right above it
+                marks[str(cid)] = max(int(marks.get(str(cid), 0)), last_seen)
+            else:
+                marks[str(cid)] = _max_msg_id(conn, cid)
     if since is None:
         _save_watermark(conn, QUESTIONS_WATERMARK, marks)
     conn.commit()
+    if stopped:
+        verbose(f"[discover] question scan stopped at the user's request "
+                f"({stats['scanned']} scanned - resumes next sync)")
     if stats["new_open"] or stats["auto_answered"]:
         verbose(f"[discover] questions: {stats['new_open']} new open, "
                 f"{stats['auto_answered']} auto-answered "
@@ -608,17 +635,32 @@ def rebuild(conn, verbose=print) -> dict:
     t = build_terms(conn, full=True, verbose=verbose)
     verbose(f"[discover] terms: {t['messages']} messages, {t['chats']} chats")
     verbose("[discover] scanning for open questions ...")
-    q = scan_questions(conn, days=3650, verbose=verbose)
+    # Full-archive radar via INCREMENTAL mode: reset the watermark first
+    # (floor 0 = every message), because incremental mode covers the
+    # whole history AND owns the watermark when it finishes. The old
+    # days=3650 path had two bugs: scan_questions caps any windowed
+    # rescan at 90 days (min(days, 90)), and windowed mode never saves
+    # the watermark - so the rebuild silently covered only 90 days and
+    # pushed a full-archive rescan into the first sync after it
+    # (v0.8.1, looked like a stuck job).
+    db.set_setting(conn, QUESTIONS_WATERMARK, "{}")
+    q = scan_questions(conn, verbose=verbose)
     return {"terms": t, "questions": q}
 
 
 def post_sync_hook():
     """Registered in app.py: keep discovery data fresh after every sync.
-    Deterministic and cheap - only genuinely new messages are processed."""
+    Deterministic and cheap - only genuinely new messages are processed.
+    Prints one summary line per phase so the Jobs log stays alive."""
     conn = db.get_db()
     try:
-        build_terms(conn, verbose=lambda *_: None)
-        scan_questions(conn, verbose=lambda *_: None)
+        t = build_terms(conn, verbose=lambda *_: None)
+        if t["messages"]:
+            print(f"[discover] term stats: {t['messages']} new message(s)")
+        q = scan_questions(conn, verbose=print)
+        if not (q["new_open"] or q["auto_answered"]):
+            print(f"[discover] questions: none new "
+                  f"({q['scanned']} scanned)")
     except Exception as e:  # noqa: BLE001 - never fails the sync
         print(f"[discover] post-sync update failed: {e}")
     finally:
