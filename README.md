@@ -56,7 +56,13 @@ Telegram session never leave it.
   per-row citations, evidence-derived status (`overdue` for past due
   dates; nothing is silently "committed" without evidence), confirm/
   dismiss/correct controls, and optional incremental extraction after
-  each sync.
+  each sync. Open decisions are then watched deterministically: newer
+  messages discussing them become follow-up citations, and a due-date
+  monitor surfaces overdue and due-soon records — no AI required.
+- **Evidence Explorer** — the reverse side of every citation: select any
+  message and see everything that references it (deals, decisions,
+  briefs, digests, alerts, FAQs, entities, thread context), each
+  jumping back to the record that cites it.
 - **Research briefs** — ask a question over selected groups and dates, get
   a saved, citation-validated, re-runnable brief with version history and
   deterministic staleness tracking.
@@ -196,7 +202,8 @@ scheduler, the AI pipeline and scope (with a mocked provider - no real
 credentials needed), setup/auth flows, saved searches, bookmarks and
 notes, deep links, exports, the citation mapping in the frontend,
 discovery (terms/stories/questions/entities/conversation), decisions
-extraction (merge, evidence-derived status, human gates), model
+extraction (merge, evidence-derived status, human gates), deterministic
+follow-up tracking, the Evidence Explorer (all citation tables), model
 routing, and the daily budget cap. Contributions welcome - see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 

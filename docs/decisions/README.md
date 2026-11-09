@@ -141,3 +141,39 @@ fingerprint). Schema v7 adds `decisions` + `decision_sources`
 (additive, idempotent). Future follow-up tracking reads
 `derived_status` instead of duplicating the rule; the model's raw
 judgment stays inspectable in its own column for auditing.
+
+## 0008 — Follow-ups are keywords; evidence is reverse-citable (2026-11-09)
+
+**Decision.** Follow-up tracking (v0.8 P0 #2) is deterministic keyword
+matching, never AI: an open decision is checked for newer messages
+matching at least two of its title's distinctive keywords (the shared
+discovery stopword pack, one bilingual definition), searched only in
+its own source chats and only above a per-chat watermark (the newest
+message already in its story — citations ∪ stored follow-ups).
+The Evidence Explorer (v0.8 P0 #3) is one read-only endpoint that
+answers "what references this message?" by joining every citation
+table — deals, decisions (source and follow-up), brief versions,
+digests, alerts, FAQ clusters (question and answer side), entity
+mentions — plus the message's own thread context.
+
+**Context.** Follow-ups are exactly the class of feature this codebase
+refuses to send to a provider: the signal is "people are still talking
+about this," which keywords answer honestly and deterministically, and
+a model would only add cost plus a new trust question. The watermark
+pattern (deals/discovery/watchlists) already exists, so the check
+rides the post-sync hook without a new scheduler. The Evidence
+Explorer's value is trust verification: every AI feature stores
+verifiable citations, but until now the only way to audit them was to
+know the record first — the reverse direction makes any message prove
+what was built on it.
+
+**Consequences.** `decision_followups` (schema v8) stores matched
+terms per row so every follow-up is auditable; the check is bounded
+(decisions × source chats × capped FTS query) and incremental by
+construction. The Evidence Explorer stays read-only — no new write
+surface, no AI involvement, honest about pre-v0.5 `reply_to` gaps via
+the existing conversation rules. FAQ sources are scanned in Python
+over the small clustered set, keeping the query portable across
+SQLite builds. Frontend focus plumbing (`evidenceFocus`) lets any
+back-reference jump to its record and expand it without per-view
+custom state.

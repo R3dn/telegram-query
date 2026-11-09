@@ -5,6 +5,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Follow-up tracking** (v0.8 P0 #2): every open decision is watched
+  deterministically after each sync — newer messages that discuss it
+  (matching ≥ 2 of its title keywords over normalized text) are stored
+  as per-decision follow-ups with their matched terms, shown as a
+  follow-up section on the decision card, and counted on a monitor
+  strip. Incremental by construction: stored follow-ups advance a
+  per-chat watermark, so re-runs only see genuinely new messages. No
+  AI involved — pure keyword matching, the shared bilingual stopword
+  pack, and the existing FTS index. A due-date monitor surfaces
+  overdue and due-within-7-days decisions; a "Check follow-ups"
+  button runs the check on demand.
+- **Evidence Explorer** (v0.8 P0 #3): select any message and the
+  Details panel shows everything that references it — deals, decisions
+  (as source *or* follow-up), research briefs, digests, alerts, FAQs
+  (as question or answer side), and entities — plus its thread
+  context (parent + direct replies, honest about pre-v0.5 `reply_to`
+  gaps). Each back-reference deep-links to the referencing record and
+  expands it (Deals/Decisions focus the row). Read-only, pure SQL,
+  no AI; unifies the whole citation story. Schema migration v7 → v8
+  (additive, idempotent).
+
 ## [0.8.0] - 2026-11-09
 
 Knowledge Intelligence: turning conversations into structured, reusable

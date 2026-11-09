@@ -20,6 +20,7 @@ session, zero external services.
                     │  ├─ exports.py    Markdown/JSON downloads      │
                     │  ├─ deals.py      deals workspace              │
                     │  ├─ decisions.py  decisions workspace         │
+                    │  ├─ evidence.py   reverse-citation lookup      │
                     │  ├─ research.py   briefs workspace             │
                     │  ├─ monitor.py    watchlists + alerts inbox    │
                     │  ├─ digests.py    digests + schedules          │
@@ -45,7 +46,7 @@ session, zero external services.
                                       │
                        ┌──────────────┴────────────────┐
                        │ SQLite (WAL) + FTS5            │
-                       │ data/messages.db  (schema v7)  │
+                       │ data/messages.db  (schema v8)  │
                        │ data/tg_session.session         │
                        └─────────────────────────────────┘
 ```
@@ -57,7 +58,7 @@ session, zero external services.
 | `config.py` | Single `Settings` object; env parsing, aliases, path resolution, normalization level, model routing (`AI_MODEL_EXTRACT/SYNTH/EMBED` with `AI_MODEL` fallback), daily AI cap |
 | `app.py` | Thin entry: routers, static serving, startup threads, post-sync + tick hook registration, upgrade backfill jobs (reindex, discovery) |
 | `api/` | HTTP routers grouped by domain; each opens its own DB connection |
-| `db.py` | Schema + versioned migrations (v7), upserts with **incremental FTS upkeep**, keyset-paginated browse, search (star/min-id filters), normalization, settings KV, verified `t.me` link builder, conversation reconstruction |
+| `db.py` | Schema + versioned migrations (v8), upserts with **incremental FTS upkeep**, keyset-paginated browse, search (star/min-id filters), normalization, settings KV, verified `t.me` link builder, conversation reconstruction |
 | `sync.py` | Telethon CLI/web sync; checkpointed resumable backfills; `reply_to` capture; `CANCEL` event honored between messages |
 | `auth.py` | Login steps (phone → code → 2FA); pending state kept in memory only |
 | `jobs.py` | JobRunner: jobs run **one at a time** (the Telegram session must not be used concurrently); queue with dedupe + priority; stdout captured for the live log; `POST_SYNC_HOOKS` + `TICK_HOOKS` seams; reindex/extract/decisions/brief/digest/faq/discover jobs |
@@ -65,7 +66,8 @@ session, zero external services.
 | `ai.py` | Ask-AI: extract keywords (extract model) → FTS → (retry) → grounded answer (synth model); explicit scope chips override model guesses |
 | `ai_tasks.py` | Shared AI task layer: model routing per task type, fence-tolerant parsing, schema validation with ONE repair attempt, provider retries with backoff+jitter, per-fingerprint result cache, per-task usage recording **with the model that served it**, daily request cap, versioned prompts, shared citation validation |
 | `deals.py` | Deals pipeline: bilingual keyword net → batched schema-constrained extraction (extract model) → strict identity merge (sources preserved) → evidence-derived status; per-chat watermark for incremental runs |
-| `decisions.py` | v0.8 decisions pipeline (same contract as deals): bilingual keyword net → batched schema-constrained extraction → strict identity merge (title+owner+due) → citations verified against the archive; evidence-derived status (`completed`/`cancelled` only from the message's words, past due → `overdue`, no evidence → `unverified`); per-chat watermark for incremental runs |
+| `decisions.py` | v0.8 decisions pipeline (same contract as deals): bilingual keyword net → batched schema-constrained extraction → strict identity merge (title+owner+due) → citations verified against the archive; evidence-derived status (`completed`/`cancelled` only from the message's words, past due → `overdue`, no evidence → `unverified`); per-chat watermark for incremental runs. v0.8.1 adds deterministic follow-up tracking: open decisions are checked after each sync for newer messages matching ≥ 2 title keywords (shared discovery stopwords), stored as per-decision follow-up citations above an advancing watermark — never AI, never a full-archive scan |
+| `api/evidence.py` | Evidence Explorer: one read-only reverse-citation lookup — deals, decisions (source + follow-up), brief versions, digests, alerts, FAQ clusters (question/answer side), entity mentions, and the message's thread context (parent + direct replies) |
 | `research.py` | Briefs: keyword retrieval + reply/neighbor context expansion → cited brief (synth model) → versioned saves; deterministic staleness |
 | `watchlists.py` | Deterministic keyword monitors over each sync's new messages; **never calls the AI** |
 | `digests.py` | Period digests with deterministic theme hints; schedule due-check + fingerprint reuse (synth model) |
@@ -119,7 +121,9 @@ Discovery (v0.7) follows the same doctrine: term stats, trending burst
 scoring, stories, activity, and the question radar are pure
 SQL/Python over stored `text_norm` and cost nothing; the only AI
 surfaces are the opt-in entity gazetteer growth and the cited topic
-timeline, both fingerprint-cached. All incremental work rides
+timeline, both fingerprint-cached. Decision follow-up tracking (v0.8.1)
+joins them: pure keyword matching over `text_norm`, incremental above
+each decision's watermark. All incremental work rides
 `POST_SYNC_HOOKS`/`TICK_HOOKS` — nothing scans the whole archive per
 run. Entity tracking covers brands/products/orgs/places/events and
 **never individual people** — no member analytics exists in this
@@ -134,6 +138,9 @@ from the message's own words, a past due date reads `overdue`, and a
 record without evidence reads `unverified` — the model's own judgment is
 kept in a separate column so extraction can never invent commitment.
 Question statuses are human-controlled and never overwritten by rescans.
+The Evidence Explorer (v0.8.1) closes the loop from the other side:
+every citation table is queryable in reverse, so any message can prove
+what was built on top of it.
 
 **Local-only posture.** No auth in-app; the default bind is `127.0.0.1`.
 The docs and UI disclose exactly what leaves the machine (retrieved

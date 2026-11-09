@@ -15,6 +15,9 @@ exactly what stays local and what can leave your machine.
 - **Saved searches, deals, decisions, research briefs, digests, FAQ
   records** — all generated and stored locally; exports write to files
   you download
+- **Decision follow-up checks and the Evidence Explorer** (v0.8) —
+  deterministic keyword matching and pure SQL joins over your local
+  archive; neither ever calls an AI provider
 - **The entire Discover view (v0.7)** — trending topics, cross-group
   stories, unanswered questions, group activity, and the entity
   gazetteer's mention matching are deterministic: computed from your
