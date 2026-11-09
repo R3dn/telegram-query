@@ -113,16 +113,33 @@ def main() -> None:
             page = ctx.new_page()
             base = f"http://127.0.0.1:{args.port}"
 
-            def goto_feed(theme: str):
-                """Load the feed in the given theme, wizard dismissed."""
-                page.goto(f"{base}/?shot")
-                page.wait_for_selector(".app")
-                page.evaluate(f"localStorage.setItem('tgq-theme', '{theme}')")
-                page.reload()
-                page.wait_for_selector(".app")
+            def dismiss_wizard():
                 page.wait_for_timeout(2500)
                 if page.locator(".wizard").count():
                     page.click(".wizard-head .btn")
+
+            def set_theme(theme: str):
+                page.evaluate(f"localStorage.setItem('tgq-theme', '{theme}')")
+                page.reload()
+                page.wait_for_selector(".app")
+
+            def open_discover(theme: str):
+                """Load the app in discover mode (default landing view)."""
+                page.goto(f"{base}/?shot")
+                page.wait_for_selector(".app")
+                set_theme(theme)
+                dismiss_wizard()
+                # wait for discover data (trending topics or empty state)
+                page.wait_for_selector(".trend-row, .side-note")
+                page.wait_for_timeout(600)
+
+            def open_browse(theme: str):
+                """Switch to Browse & search and wait for the feed."""
+                page.goto(f"{base}/?shot")
+                page.wait_for_selector(".app")
+                set_theme(theme)
+                dismiss_wizard()
+                page.locator("button:has-text('Browse')").first.click()
                 page.wait_for_selector(".msg-card")
                 page.wait_for_timeout(600)
 
@@ -139,20 +156,28 @@ def main() -> None:
             page.wait_for_timeout(400)
             save("onboarding")
 
-            # 2) dark feed with the ten synthetic groups
-            goto_feed("dark")
+            # 2) Discover view (dark) — the new landing view since v0.7
+            open_discover("dark")
+            save("discover-dark")
+
+            # 3) Browse feed (dark)
+            open_browse("dark")
             assert page.locator(".group-row").count() == 11  # 10 groups + All
             save("feed-dark")
 
-            # 3) search with highlighting
+            # 4) search with highlighting
             page.fill(".searchbox input", "discount")
             page.press(".searchbox input", "Enter")
             page.wait_for_selector("mark")
             page.wait_for_timeout(800)
             save("search")
 
-            # 4) light feed
-            goto_feed("light")
+            # 5) Discover view (light)
+            open_discover("light")
+            save("discover-light")
+
+            # 6) Browse feed (light)
+            open_browse("light")
             save("feed-light")
 
             browser.close()

@@ -3,24 +3,27 @@
 **A local-first, searchable, AI-queryable archive for your Telegram groups.**
 
 Connect your Telegram account, track the groups you care about, and turn
-them into a private, searchable knowledge base you own. Browse full history
-with day separators and filters, run full-text searches across Arabic and
-English, and ask questions answered *only* from your actual messages — with
-clickable citations back to the originals.
+them into a private, searchable knowledge base you own. The app opens on a
+**Discover** view — trending topics, cross-group stories, unanswered
+questions, and group activity — all computed deterministically from your
+archive, no AI required. Browse full history with day separators and
+filters, run full-text searches across Arabic and English, and ask questions
+answered *only* from your actual messages — with clickable citations back to
+the originals.
 
 Everything runs on your machine: the messages, the database, and your
 Telegram session never leave it.
 
 <p>
-  <img src="docs/screenshots/feed-dark.png" alt="Browse and search your archive (dark theme)" width="49.5%">
-  <img src="docs/screenshots/feed-light.png" alt="Browse and search your archive (light theme)" width="49.5%">
+  <img src="docs/screenshots/discover-dark.png" alt="Discover trending topics across your communities (dark theme)" width="49.5%">
+  <img src="docs/screenshots/discover-light.png" alt="Discover trending topics across your communities (light theme)" width="49.5%">
 </p>
 
 ## Highlights
 
 - **Local-first & private** — SQLite archive on your disk; no cloud, no
   telemetry. The server binds to `127.0.0.1` by default.
-- **Community discovery (new)** — the app opens on a **Discover** view:
+- **Community discovery** — the app opens on a **Discover** view:
   trending topics (deterministic burst scoring over a bilingual term
   index), the same post forwarded across your groups, unanswered
   questions, entity tracking (brands/products/places — never people),
@@ -106,6 +109,8 @@ configures an AI provider (with a live "test connection" button), and
 starts your first sync. Everything it saves lands in your local `.env`.
 See [docs/installation.md](docs/installation.md) for details, or try the
 app with synthetic data instead: `python scripts/seed_demo.py`.
+
+![Browse your archive](docs/screenshots/feed-dark.png)
 
 ![Search with highlights](docs/screenshots/search.png)
 
