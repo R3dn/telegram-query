@@ -96,6 +96,11 @@ export interface DecisionSource {
   missing: boolean;
 }
 
+export interface DecisionFollowup extends DecisionSource {
+  matched_terms: string[];
+  created_at: string;
+}
+
 export interface Decision {
   id: number;
   title: string;
@@ -111,6 +116,9 @@ export interface Decision {
   human_added: boolean;
   last_seen: string;
   sources: DecisionSource[];
+  followups: DecisionFollowup[];
+  followup_count: number;
+  due_soon: boolean;
 }
 
 export interface DecisionsSettings {
@@ -118,6 +126,106 @@ export interface DecisionsSettings {
   kinds: string[];
   owners: string[];
   watermark: Record<string, number>;
+}
+
+export interface DecisionsMonitor {
+  open: number;
+  overdue: number;
+  due_soon: number;
+  with_followups: number;
+}
+
+// ---- Evidence Explorer (v0.8) ----
+
+export interface EvidenceDealRef {
+  id: number;
+  title: string;
+  vendor: string | null;
+  status: string;
+  user_status: string | null;
+  confidence: number | null;
+  expires: string | null;
+  derived_status: string;
+  confidence_label: string;
+}
+
+export interface EvidenceDecisionRef {
+  id: number;
+  title: string;
+  kind: string | null;
+  owner: string | null;
+  due_date: string | null;
+  status: string;
+  user_status: string | null;
+  confidence: number | null;
+  as: "source" | "followup";
+  matched_terms?: string[];
+  derived_status: string;
+  confidence_label: string;
+}
+
+export interface EvidenceBriefRef {
+  id: number;
+  question: string;
+  version: number;
+  created_at: string;
+}
+
+export interface EvidenceDigestRef {
+  id: number;
+  period_start: string;
+  period_end: string;
+  schedule_id: number | null;
+  created_at: string;
+}
+
+export interface EvidenceAlertRef {
+  id: number;
+  matched_term: string;
+  created_at: string;
+  read: number;
+  watchlist_name: string;
+}
+
+export interface EvidenceFaqRef {
+  id: number;
+  question: string;
+  status: string;
+  frequency: number;
+  as: "question" | "answer";
+}
+
+export interface EvidenceEntityRef {
+  id: number;
+  name: string;
+  kind: string;
+  ignored: number;
+}
+
+export interface EvidenceThreadMsg {
+  chat_id: number;
+  msg_id: number;
+  text: string | null;
+  date: string | null;
+  sender_name: string | null;
+  chat_title: string | null;
+  tg_link: string | null;
+  reply_to?: number | null;
+}
+
+export interface EvidenceResponse {
+  message: EvidenceThreadMsg & { reply_to: number | null };
+  references: {
+    deals: EvidenceDealRef[];
+    decisions: EvidenceDecisionRef[];
+    briefs: EvidenceBriefRef[];
+    digests: EvidenceDigestRef[];
+    alerts: EvidenceAlertRef[];
+    faqs: EvidenceFaqRef[];
+    entities: EvidenceEntityRef[];
+  };
+  thread: { parent: EvidenceThreadMsg | null; replies: EvidenceThreadMsg[] };
+  total: number;
 }
 
 export interface BriefCitation {

@@ -107,6 +107,10 @@ interface Store {
   setModal: (m: null | "manage" | "jobs" | "settings") => void;
   wizardOpen: boolean;
   setWizardOpen: (b: boolean) => void;
+  // Evidence Explorer (v0.8): focus a referencing record after switching
+  // to its view (Deals/Decisions expand the focused row).
+  evidenceFocus: { kind: string; id: number } | null;
+  setEvidenceFocus: (f: { kind: string; id: number } | null) => void;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -394,6 +398,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [selected, select] = useState<Message | null>(null);
   const [modal, setModal] = useState<Store["modal"]>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  // Evidence Explorer: jump from a message's back-references to the
+  // referencing record and expand it ({"kind", "id"}).
+  const [evidenceFocus, setEvidenceFocus] =
+    useState<{ kind: string; id: number } | null>(null);
 
   const value = useMemo<Store>(
     () => ({
@@ -407,13 +415,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       jobs, refreshJobs,
       rightTab, setRightTab, selected, select, modal, setModal,
       wizardOpen, setWizardOpen,
+      evidenceFocus, setEvidenceFocus,
     }),
     [theme, toggleTheme, toasts, toast, appState, refreshAppState, groups,
      selection, toggleGroup, clearSelection, refreshGroups, senders, mode,
      setMode, q, runSearch, feed, hasMore, loading, loadFeed, filters,
      setFilters, dateChip, setDateChip, searchHistory, pushSearch,
      savedSearches, refreshSaved, applySaved, jobs,
-     refreshJobs, rightTab, selected, modal, wizardOpen],
+     refreshJobs, rightTab, selected, modal, wizardOpen,
+     evidenceFocus],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

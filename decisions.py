@@ -1,5 +1,6 @@
-"""Decisions extractor (v0.8): structured decision/commitment extraction
-over the archive.
+"""Decisions extractor (v0.8) + follow-up tracking (v0.8.1): structured
+decision/commitment extraction over the archive, then deterministic
+monitoring of what happens to each open decision afterwards.
 
 Pipeline (same contract as deals.py, never the whole archive):
   1. Deterministic bilingual keyword net -> FTS5 candidate retrieval.
@@ -22,13 +23,16 @@ provider unless the prompt version changes.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import ai_tasks
 import config
 import db
+import discover
 
-__all__ = ["extract", "post_sync_hook", "derived_status", "confidence_label",
+__all__ = ["extract", "post_sync_hook", "check_followups",
+           "derived_status", "confidence_label",
            "PROMPT_VERSION", "CANDIDATE_TERMS"]
 
 PROMPT_VERSION = "decisions-v1"
@@ -428,14 +432,120 @@ def confidence_label(c) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Post-sync hook (incremental extraction when enabled)
+# Follow-up tracking (v0.8.1) - deterministic, incremental, never AI
+# ---------------------------------------------------------------------------
+
+FOLLOWUP_MIN_HITS = 2   # message must match >= 2 title keywords
+FOLLOWUP_MAX_TERMS = 5   # cap distinct keywords per decision
+FOLLOWUP_SEARCH_LIMIT = 100  # cap candidates per chat per check
+
+
+def _followup_keywords(title: str) -> list[str]:
+    """Distinctive keywords from a decision title, normalized, stopwords
+    (the discovery pack - one bilingual definition) and digits removed."""
+    text = db.normalize_text(title or "")
+    out: list[str] = []
+    seen: set[str] = set()
+    for w in re.split(r"\s+", text):
+        if len(w) < 3 or w.isdigit() or w in discover.STOPWORDS or w in seen:
+            continue
+        seen.add(w)
+        out.append(w)
+        if len(out) >= FOLLOWUP_MAX_TERMS:
+            break
+    return out
+
+
+def _followup_watermark(conn, decision_id: int) -> dict[int, int]:
+    """Per-chat watermark: the newest message already known to belong to
+    this decision's story (its citations + stored follow-ups)."""
+    rows = conn.execute(
+        """SELECT chat_id, MAX(msg_id) m FROM (
+             SELECT chat_id, msg_id FROM decision_sources
+               WHERE decision_id = ?
+             UNION ALL
+             SELECT chat_id, msg_id FROM decision_followups
+               WHERE decision_id = ?
+           ) GROUP BY chat_id""", (decision_id, decision_id)).fetchall()
+    return {r["chat_id"]: r["m"] for r in rows}
+
+
+def check_followups(conn, chat_ids=None, verbose=print):
+    """Find newer messages that discuss each open decision.
+
+    Deterministic keyword check over ``text_norm`` (never AI, never a
+    full-archive scan): every open decision (not completed/cancelled,
+    not dismissed) is searched only in its own source chats, only above
+    its per-chat watermark; a message counts as a follow-up when it
+    matches at least two of the title's distinctive keywords.
+
+    Incremental by construction: stored follow-ups advance the
+    watermark, so re-runs only ever see genuinely new messages.
+    """
+    stats = {"decisions": 0, "checked": 0, "new_followups": 0}
+    now = _now()
+    rows = conn.execute(
+        """SELECT d.* FROM decisions d
+           WHERE (d.user_status IS NULL OR d.user_status != 'dismissed')
+             AND COALESCE(d.status, 'unknown') NOT IN
+                 ('completed', 'cancelled')
+           ORDER BY d.last_seen DESC""").fetchall()
+    stats["decisions"] = len(rows)
+    for r in rows:
+        d = dict(r)
+        keywords = _followup_keywords(d["title"])
+        if not keywords:
+            continue
+        wm = _followup_watermark(conn, d["id"])
+        scope = [cid for cid in (chat_ids or wm) if cid in wm]
+        if not scope:
+            continue   # manual decision with no citations: nothing to watch
+        found = []
+        for cid in scope:
+            hits = db.search(conn, keywords, chat_ids=[cid],
+                             require_all=False,
+                             limit=FOLLOWUP_SEARCH_LIMIT,
+                             min_msg_id=wm[cid])
+            for h in hits:
+                norm = db.normalize_text(h["text"] or "")
+                matched = [k for k in keywords if k in norm]
+                if len(matched) >= min(FOLLOWUP_MIN_HITS, len(keywords)):
+                    found.append((h, matched))
+        stats["checked"] += 1
+        added = 0
+        for h, matched in found:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO decision_followups
+                     (decision_id, chat_id, msg_id, matched_terms, created_at)
+                   VALUES (?,?,?,?,?)""",
+                (d["id"], h["chat_id"], h["msg_id"],
+                 json.dumps(matched, ensure_ascii=False), now))
+            added += cur.rowcount
+        if added:
+            conn.execute("UPDATE decisions SET updated_at=? WHERE id=?",
+                         (now, d["id"]))
+        stats["new_followups"] += added
+    conn.commit()
+    if stats["decisions"]:
+        verbose(f"[decisions] follow-up check: {stats['decisions']} open "
+                f"decision(s), +{stats['new_followups']} new follow-up(s)")
+    return stats
+
+
+# ---------------------------------------------------------------------------
+# Post-sync hook (incremental extraction when enabled + follow-up check)
 # ---------------------------------------------------------------------------
 
 def post_sync_hook():
     """Runs inside the sync job after a successful sync (v0.6-style seam).
-    Only does work when the user enabled auto-extraction."""
+    The follow-up check is deterministic and cheap - it always runs.
+    Extraction only runs when the user enabled auto-extraction."""
     conn = db.get_db()
     try:
+        try:
+            check_followups(conn)
+        except Exception as e:  # noqa: BLE001 - never fails the sync
+            print(f"[decisions] follow-up check failed: {e}")
         if db.get_setting(conn, "decisions_auto", "0") != "1":
             return
         if not config.settings.ai_configured:

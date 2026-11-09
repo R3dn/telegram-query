@@ -209,6 +209,91 @@ def test_derived_status_matrix():
 
 
 # ---------------------------------------------------------------------------
+# Follow-up tracking (v0.8.1) - deterministic, incremental
+# ---------------------------------------------------------------------------
+
+def _store_decision_direct(conn, title, chat_id, msg_id, status="committed"):
+    """Insert one decision with a single citation (no AI involved)."""
+    now = "2026-11-09T00:00:00+00:00"
+    cur = conn.execute(
+        """INSERT INTO decisions (title, detail, kind, status, confidence,
+             fingerprint, prompt_version, model, first_seen, last_seen,
+             updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (title, "", "commitment", status, 0.9,
+         f"fp-{abs(hash(title)) % 10**8}", "test", "test-model",
+         now, now, now))
+    dec_id = cur.lastrowid
+    conn.execute(
+        "INSERT OR IGNORE INTO decision_sources (decision_id, chat_id, msg_id)"
+        " VALUES (?,?,?)", (dec_id, chat_id, msg_id))
+    conn.commit()
+    return dec_id
+
+
+def test_followups_found_and_incremental(conn):
+    db.upsert_chat(conn, -1, "Dealz", "dealz", "group")
+    # the decision (msg 1): "launch the new website design"
+    db.upsert_message(conn, -1, 1, iso(3), 1, "ali",
+                      "We decided to launch the new website design next week")
+    # a newer message that discusses it (hits: launch, website, design)
+    db.upsert_message(conn, -1, 2, iso(2), 2, "sara",
+                      "about the website design launch - is the header ready?")
+    # noise: only one keyword hit
+    db.upsert_message(conn, -1, 3, iso(2), 3, "nora",
+                      "check the design of my business card please")
+    conn.commit()
+
+    dec_id = _store_decision_direct(
+        conn, "launch the new website design", -1, 1)
+    stats = decisions.check_followups(conn)
+    assert stats["decisions"] == 1
+    assert stats["new_followups"] == 1, "two-keyword message is a follow-up"
+    rows = conn.execute(
+        "SELECT * FROM decision_followups WHERE decision_id=?",
+        (dec_id,)).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["msg_id"] == 2
+    assert json.loads(rows[0]["matched_terms"]), "matched terms are stored"
+
+    # second run is a no-op: the watermark advanced past the follow-up
+    stats = decisions.check_followups(conn)
+    assert stats["new_followups"] == 0, "incremental - nothing re-found"
+
+
+def test_followups_skip_closed_and_dismissed(conn):
+    db.upsert_chat(conn, -1, "Dealz", "dealz", "group")
+    db.upsert_message(conn, -1, 1, iso(3), 1, "ali",
+                      "We decided to launch the new website design")
+    db.upsert_message(conn, -1, 2, iso(2), 2, "sara",
+                      "website design launch status update")
+    conn.commit()
+    _store_decision_direct(conn, "launch the new website design",
+                           -1, 1, status="completed")
+    gone = _store_decision_direct(conn, "launch the new website design v2",
+                                  -1, 1, status="committed")
+    conn.execute("UPDATE decisions SET user_status='dismissed' WHERE id=?",
+                 (gone,))
+    conn.commit()
+
+    stats = decisions.check_followups(conn)
+    assert stats["checked"] == 0, "completed + dismissed rows are not checked"
+    assert conn.execute("SELECT COUNT(*) c FROM decision_followups"
+                        ).fetchone()["c"] == 0
+
+
+def test_followup_keywords_filter_stopwords():
+    kws = decisions._followup_keywords(
+        "We decided to launch the new website design")
+    assert "the" not in kws and "to" not in kws
+    assert "launch" in kws and "website" in kws and "design" in kws
+    # arabic stopwords are filtered with the shared discovery pack
+    kws_ar = decisions._followup_keywords("قررنا نبدأ تصميم الموقع الجديد")
+    assert all(w not in ("من", "في", "على") for w in kws_ar)
+    assert len(kws) <= decisions.FOLLOWUP_MAX_TERMS
+
+
+# ---------------------------------------------------------------------------
 # API layer
 # ---------------------------------------------------------------------------
 
@@ -274,6 +359,47 @@ def test_extract_requires_ai(api_client, monkeypatch):
     r = api_client.post("/api/decisions/extract", json={})
     assert r.status_code == 400
     assert "AI is not configured" in r.json()["error"]
+
+
+def test_followup_api_and_monitor(api_client, monkeypatch):
+    with db.get_db() as conn:
+        db.upsert_chat(conn, -1, "Dealz", "dealz", "group")
+        db.upsert_message(conn, -1, 1, iso(3), 1, "ali",
+                          "We decided to launch the new website design")
+        db.upsert_message(conn, -1, 2, iso(2), 2, "sara",
+                          "website design launch status update")
+        db.upsert_message(conn, -1, 3, iso(1), 4, "omar",
+                          "website design launch delayed one week")
+        conn.commit()
+        _store_decision_direct(conn, "launch the new website design", -1, 1)
+        # an overdue decision for the monitor counts
+        dec2 = _store_decision_direct(conn, "prepare the quarterly report",
+                                      -1, 3)
+        conn.execute("UPDATE decisions SET due_date='2020-01-01' WHERE id=?",
+                     (dec2,))
+        conn.commit()
+
+    # manual check endpoint (also rides every sync via the post-sync hook)
+    r = api_client.post("/api/decisions/check-followups")
+    assert r.status_code == 200
+    stats = r.json()
+    assert stats["new_followups"] >= 1
+
+    # rows carry the follow-ups + counts
+    rows = api_client.get("/api/decisions").json()
+    web = next(d for d in rows if "website" in d["title"])
+    assert web["followup_count"] == 2
+    assert len(web["followups"]) == 2
+    assert all(f["tg_link"] for f in web["followups"])
+    rep = next(d for d in rows if "quarterly" in d["title"])
+    assert rep["derived_status"] == "overdue"
+    assert rep["due_soon"] is False
+
+    # monitor counts: overdue >= 1, with_followups >= 1
+    mon = api_client.get("/api/decisions/monitor").json()
+    assert mon["open"] == 2
+    assert mon["overdue"] == 1
+    assert mon["with_followups"] == 1
 
 
 def test_export_decisions(api_client, monkeypatch):

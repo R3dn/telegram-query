@@ -9,7 +9,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
-import type { Decision, DecisionsSettings } from "../api/types";
+import type { Decision, DecisionsSettings, DecisionsMonitor } from "../api/types";
 import { statusTone } from "../utils/format";
 import { EmptyState } from "./EmptyState";
 import { Modal } from "./Modal";
@@ -19,9 +19,11 @@ const STATUSES = ["proposed", "committed", "completed", "cancelled",
 const KINDS = ["decision", "commitment", "plan"];
 
 export function DecisionsView() {
-  const { appState, toast, jobs, groups } = useStore();
+  const { appState, toast, jobs, groups, evidenceFocus, setEvidenceFocus }
+    = useStore();
   const [rows, setRows] = useState<Decision[] | null>(null);
   const [settings, setSettings] = useState<DecisionsSettings | null>(null);
+  const [monitor, setMonitor] = useState<DecisionsMonitor | null>(null);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [kind, setKind] = useState("");
@@ -44,6 +46,10 @@ export function DecisionsView() {
     }
   };
 
+  const loadMonitor = () => {
+    api.decisionsMonitor().then(setMonitor).catch(() => { /* ignore */ });
+  };
+
   useEffect(() => {
     const t = setTimeout(() => void load(), q ? 250 : 0);
     return () => clearTimeout(t);
@@ -52,6 +58,7 @@ export function DecisionsView() {
 
   useEffect(() => {
     api.decisionsSettings().then(setSettings).catch(() => { /* ignore */ });
+    loadMonitor();
   }, []);
 
   // refresh when the decisions job finishes (any job completion re-checks)
@@ -61,11 +68,33 @@ export function DecisionsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastDone?.finished_at]);
 
+  // Evidence Explorer: arriving with a focus -> expand that decision
+  useEffect(() => {
+    if (evidenceFocus?.kind === "decision") {
+      setExpanded(evidenceFocus.id);
+      setEvidenceFocus(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidenceFocus]);
+
   const act = async (fn: () => Promise<unknown>, msg: string) => {
     try {
       await fn();
       toast(msg, "good");
       await load();
+    } catch (e) {
+      toast((e as Error).message, "err");
+    }
+  };
+
+  const checkFollowups = async () => {
+    try {
+      const s = await api.decisionsCheckFollowups();
+      toast(s.new_followups > 0
+        ? `Found ${s.new_followups} new follow-up(s)`
+        : "No new follow-ups", s.new_followups > 0 ? "good" : "info");
+      await load();
+      loadMonitor();
     } catch (e) {
       toast((e as Error).message, "err");
     }
@@ -117,12 +146,41 @@ export function DecisionsView() {
           <option value="confidence">Most confident</option>
         </select>
         <span style={{ flex: 1 }} />
+        <button className="btn ghost sm" title="Deterministic keyword check - also runs after every sync"
+                onClick={() => void checkFollowups()}>Check follow-ups</button>
         <button className="btn ghost sm" onClick={() => void act(() => api.exportDecisions("md"), "Exported")}>Export .md</button>
         <button className="btn ghost sm" onClick={() => void act(() => api.exportDecisions("json"), "Exported")}>.json</button>
         <button className="btn primary sm" disabled={!aiOn}
                 title={aiOn ? "Analyze the archive for decisions and commitments" : "Configure an AI provider first"}
                 onClick={() => setExtractOpen(true)}>Extract decisions</button>
       </div>
+
+      {monitor && monitor.open > 0 && (
+        <div className="deal-auto-row">
+          <span className="dim" style={{ fontSize: 12 }}>
+            <b>{monitor.open}</b> open
+          </span>
+          {monitor.overdue > 0 && (
+            <button className="badge err" title="Show overdue decisions"
+                    onClick={() => setStatus("overdue")}>
+              {monitor.overdue} overdue
+            </button>
+          )}
+          {monitor.due_soon > 0 && (
+            <span className="badge warn" title="Due within 7 days">
+              {monitor.due_soon} due soon
+            </span>
+          )}
+          {monitor.with_followups > 0 && (
+            <span className="badge" title="Decisions with newer messages discussing them">
+              {monitor.with_followups} with follow-ups
+            </span>
+          )}
+          <span className="dim" style={{ fontSize: 12 }}>
+            follow-up checks run after every sync
+          </span>
+        </div>
+      )}
 
       {settings && (
         <div className="deal-auto-row">
@@ -203,11 +261,18 @@ function DecisionCard({ d, open, onToggle, onChanged }: {
           <div className="deal-title" dir="auto">
             {d.title}
             {d.user_status === "confirmed" && <span className="badge good" style={{ marginInlineStart: 6 }}>✓ confirmed</span>}
+            {d.followup_count > 0 && (
+              <span className="badge" style={{ marginInlineStart: 6 }}
+                    title={`${d.followup_count} newer message(s) discuss this decision`}>
+                ⇢ {d.followup_count} follow-up{d.followup_count === 1 ? "" : "s"}
+              </span>
+            )}
           </div>
           <div className="deal-meta" dir="auto">
             {d.kind && <span className="dim">{d.kind}</span>}
             {d.owner && <span>👤 {d.owner}</span>}
             {d.due_date && <span>↳ {d.due_date}</span>}
+            {d.due_soon && <span className="badge warn">due soon</span>}
             <span className="dim">· {d.sources.length} source{d.sources.length === 1 ? "" : "s"}</span>
             <span className="dim">· {d.confidence_label} confidence</span>
           </div>
@@ -233,6 +298,26 @@ function DecisionCard({ d, open, onToggle, onChanged }: {
               </div>
             ))}
           </div>
+          {d.followups.length > 0 && (
+            <div className="deal-sources">
+              <span className="label">
+                Follow-ups ({d.followup_count}) — newer messages about this
+                decision
+              </span>
+              {d.followups.map((f, i) => (
+                <div key={`fu${i}`} className="src-row" dir="auto">
+                  <span className="src-title">{f.chat_title ?? "?"}</span>
+                  <span className="src-date">{(f.date ?? "").slice(0, 10)}</span>
+                  <span className="src-text">{(f.text ?? "[deleted from archive]").slice(0, 120)}</span>
+                  {f.tg_link && (
+                    <button className="link" onClick={() => window.open(f.tg_link!, "_blank", "noopener")}>
+                      Telegram ↗
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="deal-actions">
             {d.user_status !== "confirmed" && (
               <button className="btn primary sm"

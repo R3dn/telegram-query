@@ -35,6 +35,7 @@ from api import deals as deals_api
 from api import decisions as decisions_api
 from api import digests as digests_api
 from api import discover as discover_api
+from api import evidence as evidence_api
 from api import exports as exports_api
 from api import faqs as faqs_api
 from api import jobs as jobs_api
@@ -131,7 +132,8 @@ for router in (general.router, auth_api.router, archive.router,
                scheduler_api.router, saved_api.router, bookmarks_api.router,
                exports_api.router, deals_api.router, research_api.router,
                monitor_api.router, faqs_api.router, digests_api.router,
-               discover_api.router, decisions_api.router):
+               discover_api.router, decisions_api.router,
+               evidence_api.router):
     app.include_router(router)
 
 

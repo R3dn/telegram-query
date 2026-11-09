@@ -15,7 +15,7 @@ import { Modal } from "./Modal";
 const STATUSES = ["active", "upcoming", "expired", "unverified", "unknown"];
 
 export function DealsView() {
-  const { appState, toast, jobs, groups } = useStore();
+  const { appState, toast, jobs, groups, evidenceFocus, setEvidenceFocus } = useStore();
   const [rows, setRows] = useState<Deal[] | null>(null);
   const [settings, setSettings] = useState<DealsSettings | null>(null);
   const [q, setQ] = useState("");
@@ -25,6 +25,15 @@ export function DealsView() {
   const [sort, setSort] = useState("recent");
   const [expanded, setExpanded] = useState<number | null>(null);
   const [extractOpen, setExtractOpen] = useState(false);
+
+  // Evidence Explorer: arriving with a focus -> expand that deal
+  useEffect(() => {
+    if (evidenceFocus?.kind === "deal") {
+      setExpanded(evidenceFocus.id);
+      setEvidenceFocus(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidenceFocus]);
 
   const load = async () => {
     try {

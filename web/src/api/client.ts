@@ -13,12 +13,14 @@ import type {
   DealsSettings,
   Decision,
   DecisionsSettings,
+  DecisionsMonitor,
   Digest,
   DigestSchedule,
   Dialog,
   EntitiesSettings,
   Entity,
   EntityDetail,
+  EvidenceResponse,
   Faq,
   FeedPage,
   Group,
@@ -224,8 +226,16 @@ export const api = {
   decisionsSettings: () => req<DecisionsSettings>("/api/decisions/settings"),
   decisionsAuto: (enabled: boolean) =>
     post<{ auto: boolean }>("/api/decisions/auto", { enabled }),
+  decisionsMonitor: () => req<DecisionsMonitor>("/api/decisions/monitor"),
+  decisionsCheckFollowups: () =>
+    post<{ decisions: number; checked: number; new_followups: number }>(
+      "/api/decisions/check-followups"),
   exportDecisions: (format: "md" | "json") =>
     download(`/api/export/decisions?format=${format}`),
+
+  // evidence explorer (v0.8)
+  evidence: (chatId: number, msgId: number) =>
+    req<EvidenceResponse>(`/api/evidence?chat_id=${chatId}&msg_id=${msgId}`),
 
   // research briefs (v0.5)
   briefs: () => req<Brief[]>("/api/briefs"),

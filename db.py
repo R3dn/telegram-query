@@ -445,10 +445,28 @@ CREATE INDEX IF NOT EXISTS idx_decisions_last_seen ON decisions(last_seen);
 CREATE INDEX IF NOT EXISTS idx_decisions_due ON decisions(due_date);
 CREATE INDEX IF NOT EXISTS idx_decision_sources_msg
     ON decision_sources(chat_id, msg_id);
+
+-- v0.8.1: deterministic follow-up tracking --------------------------------
+-- Newer messages that discuss an open decision (>= 2 title keywords),
+-- found incrementally above each decision's per-chat watermark (max
+-- msg_id over its sources + stored follow-ups). Pure keyword matching
+-- over text_norm - never AI, never a full-archive scan.
+CREATE TABLE IF NOT EXISTS decision_followups (
+    decision_id   INTEGER NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+    chat_id       INTEGER NOT NULL,
+    msg_id        INTEGER NOT NULL,
+    matched_terms TEXT NOT NULL DEFAULT '[]',   -- JSON keywords that hit
+    created_at    TEXT NOT NULL,
+    PRIMARY KEY (decision_id, chat_id, msg_id),
+    FOREIGN KEY (chat_id, msg_id) REFERENCES messages(chat_id, msg_id)
+        ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_decision_followups_msg
+    ON decision_followups(chat_id, msg_id);
 """
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 def _migrate(conn):
@@ -510,6 +528,10 @@ def _migrate(conn):
         # v7: decisions layer (decisions/decision_sources, created by
         # SCHEMA for fresh and existing databases). No data transforms.
         current = 7
+    if current < 8:
+        # v8: deterministic decision follow-ups (decision_followups,
+        # created by SCHEMA). No data transforms.
+        current = 8
     conn.execute(
         "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)",
         (str(current),))

@@ -3,7 +3,7 @@ extraction jobs and settings."""
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -42,7 +42,43 @@ def _row_to_dict(conn, r) -> dict:
                                         sd.pop("chat_username"), sd["msg_id"])
         sd["missing"] = sd.get("text") is None
         d["sources"].append(sd)
+    # deterministic follow-ups (v0.8.1): newer messages discussing it
+    fu = conn.execute(
+        """SELECT f.chat_id, f.msg_id, f.matched_terms, f.created_at,
+                  m.text, m.date, m.sender_name,
+                  c.title AS chat_title, c.username AS chat_username
+           FROM decision_followups f
+           LEFT JOIN messages m ON m.chat_id = f.chat_id AND m.msg_id = f.msg_id
+           LEFT JOIN chats c   ON c.chat_id = f.chat_id
+           WHERE f.decision_id=? ORDER BY m.date DESC LIMIT 50""",
+        (d["id"],)).fetchall()
+    d["followups"] = []
+    for f in fu:
+        fd = dict(f)
+        fd["matched_terms"] = json.loads(fd.get("matched_terms") or "[]")
+        fd["tg_link"] = db.message_link(fd["chat_id"],
+                                        fd.pop("chat_username"), fd["msg_id"])
+        fd["missing"] = fd.get("text") is None
+        d["followups"].append(fd)
+    d["followup_count"] = conn.execute(
+        "SELECT COUNT(*) c FROM decision_followups WHERE decision_id=?",
+        (d["id"],)).fetchone()["c"]
+    d["due_soon"] = _due_soon(d)
     return d
+
+
+def _today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _due_soon(d: dict, days: int = 7) -> bool:
+    """Due within the next `days` (and still open)."""
+    due = d.get("due_date")
+    if not due or d.get("status") in ("completed", "cancelled"):
+        return False
+    today = _today()
+    return today <= due <= (datetime.now(timezone.utc)
+                           + timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 @router.get("/api/decisions")
@@ -115,6 +151,37 @@ def decisions_settings():
             "ORDER BY owner LIMIT 200").fetchall()]
     return {"auto": auto, "kinds": kinds, "owners": owners,
             "watermark": watermark}
+
+
+@router.get("/api/decisions/monitor")
+def decisions_monitor():
+    """Deterministic due-date + follow-up board over open decisions
+    (v0.8.1). Pure SQL + the same derived rules as the rows themselves.
+    Registered before the {decision_id} route so it is not shadowed."""
+    today = _today()
+    soon = (datetime.now(timezone.utc) + timedelta(days=7)
+            ).strftime("%Y-%m-%d")
+    with open_db() as conn:
+        open_where = ("(user_status IS NULL OR user_status != 'dismissed') "
+                      "AND COALESCE(status, 'unknown') NOT IN "
+                      "('completed', 'cancelled')")
+        overdue = conn.execute(
+            f"SELECT COUNT(*) c FROM decisions WHERE {open_where} "
+            "AND due_date IS NOT NULL AND due_date < ?",
+            (today,)).fetchone()["c"]
+        due_soon = conn.execute(
+            f"SELECT COUNT(*) c FROM decisions WHERE {open_where} "
+            "AND due_date IS NOT NULL AND due_date BETWEEN ? AND ?",
+            (today, soon)).fetchone()["c"]
+        with_followups = conn.execute(
+            f"SELECT COUNT(DISTINCT f.decision_id) c FROM decision_followups f "
+            f"JOIN decisions d ON d.id = f.decision_id WHERE {open_where}"
+        ).fetchone()["c"]
+        open_count = conn.execute(
+            f"SELECT COUNT(*) c FROM decisions WHERE {open_where}"
+        ).fetchone()["c"]
+    return {"open": open_count, "overdue": overdue, "due_soon": due_soon,
+            "with_followups": with_followups}
 
 
 @router.get("/api/decisions/{decision_id}")
@@ -263,3 +330,11 @@ def set_auto(req: AutoRequest):
         db.set_setting(conn, "decisions_auto", "1" if req.enabled else "0")
         conn.commit()
         return {"auto": req.enabled}
+
+
+@router.post("/api/decisions/check-followups")
+def check_followups_now():
+    """Run the deterministic follow-up check now (it also rides every
+    sync). Cheap and bounded - safe to call synchronously."""
+    with open_db() as conn:
+        return decisions.check_followups(conn)
