@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-09
+
+Completes the v0.8.0 P0 track: open decisions are watched
+deterministically, and every citation becomes queryable in reverse.
+Both features are pure keyword/SQL work — no AI, no new provider
+surfaces.
+
 ### Added
 - **Follow-up tracking** (v0.8 P0 #2): every open decision is watched
   deterministically after each sync — newer messages that discuss it
