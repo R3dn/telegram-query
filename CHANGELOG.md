@@ -3,6 +3,133 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.1] - 2026-11-12
+
+Desktop-only point release: the native window + tray desktop runtime,
+the wizard and right-panel fixes found in live UI testing, and the
+recorded policy that the Windows desktop app is the only distribution
+target (decision 0010 in docs/decisions/README.md).
+
+
+
+### Added
+- **Native app window** (`desktop.py`): the packaged app now opens in
+  its own desktop window (pywebview + Microsoft Edge WebView2). Closing
+  the window quits gracefully, the in-app Exit action closes the
+  window, a second launch focuses the running window (by title, via
+  `Win32`), and the UI's localStorage (theme, language, panel state)
+  persists in `<data>/webview` instead of being wiped each launch.
+  `--no-browser`/`TGQ_NO_BROWSER` still work and gained the clearer
+  alias `--no-window`/`TGQ_NO_WINDOW`.
+- **System tray icon** (`pystray`): the app minimizes to the notification
+  area instead of the taskbar. Left-click the tray icon (or choose
+  "Open") to restore the window; right-click for the menu. The tray
+  uses the same Paper-Plane+lens mark as the executable. A missing icon
+  degrades to a solid brand-colour placeholder.
+- **WebView2 runtime gate**: before creating the window, the runtime
+  checks the EdgeUpdate `pv` value (mirroring pywebview's threshold).
+  A missing runtime would otherwise silently drop pywebview to the
+  legacy MSHTML (IE) renderer, which cannot run the React UI. Since the
+  browser fallback was removed, a missing runtime now shows an error
+  dialog and exits. `runtime.json` records the UI mode so second launches
+  know whether to look for a window.
+- **`TGQ_ENV_FILE` override** (`config.py`): points the app at a
+  different writable `.env`. Test harnesses use it to run the app
+  against a throwaway file so a test can never read or write a real
+  `.env`.
+- **Window/taskbar icon on source runs**: `python desktop.py` now shows
+  the app's mark in the taskbar and title bar (previously Python's
+  generic icon). The full fix goes beyond `WM_SETICON` — Windows groups
+  taskbar icons by the process *and* its AppUserModelID, not by the
+  per-window icon. `desktop.py` sets the class icon via
+  `SetClassLongPtrW`, assigns the explicit AUMID
+  `Redn.TelegramQuery.Desktop`, and creates a Start Menu shortcut
+  (`Telegram Query.lnk`) carrying the same AUMID and `app.ico`. The
+  shortcut is created silently; `pywin32` is used if available, skipped
+  otherwise. The packaged exe already has its icon from PyInstaller.
+- **Interactive desktop smoke test** (`scripts/e2e_smoke_desktop.py`):
+  boots the real `desktop.py` runtime fully isolated (own data dir +
+  `.env` via `TGQ_ENV_FILE`) and drives the production UI end to end —
+  setup wizard (typed + submitted credentials, step advance, re-open
+  via the sidebar footer link), click-navigation across every view
+  plus Ask AI, Jobs, and Settings modals, theme/language toggles,
+  persistence across a full window restart, second-launch focus, and
+  graceful quit — with a hard zero-console-errors gate. Dev-only
+  dependency: Playwright.
+- **`pywin32` is now a declared runtime dependency on Windows**
+  (`sys_platform == "win32"` marker): `desktop.py`'s taskbar-icon /
+  AUMID Start-Menu-shortcut path silently degrades without it, and a
+  desktop-only release should never carry that gap. The marker keeps
+  the Linux CI install intact; the runtime still skips gracefully if
+  the package is absent.
+
+### Changed
+- **Setup wizard** (`web/`): on an already-configured install the wizard
+  opens on a completion card; it now offers a "Change API credentials…"
+  shortcut that jumps straight into the credentials edit form (the same
+  form the Settings modal uses) instead of a dead end.
+- **Packaging** (`TelegramQuery.spec`): bundles the pywebview/pythonnet
+  window stack (hidden imports for `webview` + `edgechromium` +
+  `winforms` + `clr`; the standard hooks collect WebView2 interop DLLs
+  and `Python.Runtime.dll`) and excludes the unused qt/gtk/cocoa/
+  android pywebview backends.
+- `requirements.txt` gains `pywebview>=6.0,<7` (pulls pythonnet on
+  Windows).
+- **UI cleanup pass**: strip redundant subtitle text from Discover
+  heading (tooltip only); replace secondary text buttons with icon-only
+  ghost buttons (rebuild, timeline); remove redundant View buttons on
+  trend rows — the term text is already clickable; right-panel tabs
+  restyled as pill-shaped segmented control with Details disabled when
+  nothing selected; compact AI-panel scope chips; denser trending rows;
+  denser right-panel empty states (start-aligned, compact icon+hint).
+- **Release policy: desktop-only.** The Windows desktop app (Setup
+  EXE / MSI) is the only distribution target; the loopback server is
+  an internal detail of the desktop runtime, never a deployment
+  surface. The source run (`python app.py`) and `--no-window` remain
+  for development and the test harness. Recorded as decision 0010 in
+  [docs/decisions/README.md](docs/decisions/README.md).
+- **Docs follow the desktop-only policy**: the pre-desktop production
+  deployment runbook moved to `docs/archive/` (marked historical); the
+  non-loopback `HOST` startup warning now points at `SECURITY.md`
+  instead of the deployment guide; build artifacts (`build/`, `dist/`)
+  removed from the working tree.
+
+### Fixed
+- **Wizard (and all views) invisible in production builds**: the view
+  `@import` block in `web/src/design/app.css` sat at the bottom of the
+  file after 458 lines of rules, which makes the import both illegal
+  per CSS spec and unsupported by postcss-import. Vite silently dropped
+  the entire block from production bundles (35KB → 51KB when fixed),
+  so every view lost its per-view stylesheet. The wizard overlay lost
+  `position: fixed` and rendered as an unstyled static block off-screen,
+  making it look like clicking "Setup wizard" did nothing. The import
+  block is now at the absolute top of `app.css` with a strong warning
+  comment so it can never regress. This also restores Discover trending
+  rows, bookmark/deal/digest cards, and other view-specific polish.
+- **Ask AI never reopened after closing the panel**: the right panel's
+  visibility lived as local state inside the panel component, where the
+  sidebar's Ask AI button couldn't reach it. Visibility moved into the
+  shared store (`rightOpen`/`setRightOpen`); the sidebar button and the
+  mobile nav now open the panel explicitly, and `.app.hide-right`
+  collapses the grid column so a hidden panel leaves no 360px dead
+  column behind.
+- **~300px of dead space above the AI panel's example chips**: the
+  `.ai-chat` container rendered unconditionally with `flex: 1`, so with
+  an empty conversation it greedily consumed the panel's height and
+  pushed the examples to the bottom. It now renders only when there are
+  turns (or a busy indicator) to show.
+- **Right panel not flush to the window edge / resize mismatch**: the
+  shell grid's third column was a fixed `var(--right-w)` (360px) while
+  the drag handle resizes the panel element itself — so a resized panel
+  overflowed its grid cell — and an inline `maxWidth: 50vw` capped it
+  arbitrarily. The column is now `auto` (the grid follows the panel's
+  actual width), the cap is removed, `#root` and `.app` span the full
+  window, and `.right` gained `min-width: 280px` to match the drag
+  clamp. Verified at 1280/1400/1600/1920px: the panel is flush to the
+  right edge, no horizontal scrollbar, drag-resize persists, the
+  close → Ask-AI reopen cycle is clean, and narrow (≤1100px) drawer
+  mode is unchanged.
+
 ## [1.0.0] - 2026-11-11
 
 First desktop release: Windows installers, a full UI/UX overhaul, and
@@ -50,8 +177,6 @@ additive API only. Details: [release-notes.md](release-notes.md).
   rings and restyled empty/loading states.
 - CI gains a Windows `packaging` job producing the installers as
   artifacts; `web/package.json` now tracks `config.__version__`.
-
-## [Unreleased]
 
 ## [0.9.0] - 2026-11-10
 

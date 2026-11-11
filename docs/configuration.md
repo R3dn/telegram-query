@@ -23,6 +23,11 @@ or writes them to logs.
   launch (copy + backup; the original is never modified).
 - Legacy `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` names are accepted as
   aliases of `TG_API_ID` / `TG_API_HASH`.
+- `TGQ_ENV_FILE` relocates the writable `.env` entirely (an empty or
+  missing file is fine). Test harnesses use it to run the app against a
+  throwaway file so a test can never read or write a real `.env`.
+- Everything else is read from the environment; the `.env` file only
+  fills in variables that are not already set.
 
 ## Telegram
 
@@ -101,7 +106,7 @@ These apply to `TelegramQuery.exe` (harmless no-ops in source runs):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TGQ_NO_BROWSER` | unset | Set to `1` to skip opening the browser at startup (the server still starts and reports healthy). CLI flag `--no-browser` does the same |
+| `TGQ_NO_WINDOW` | unset | Set to `1` to run headless — no app window is opened (the server still starts and reports healthy). CLI flag `--no-window` does the same; the legacy `TGQ_NO_BROWSER`/`--no-browser` names still work as aliases |
 | `TGQ_STARTUP_TIMEOUT` | `60` | Seconds to wait for the backend health check before showing the startup-failed dialog (minimum 5) |
 
 Desktop mode notes: the bind address is **always loopback** (a non-loopback

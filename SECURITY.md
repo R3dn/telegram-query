@@ -19,7 +19,7 @@ Telegram Query is a **single-user, local-first** application:
   other websites). Extra hosts can be allowed via `TG_ALLOWED_HOSTS` —
   only if you deliberately expose the app.
 - Secrets (`TG_API_HASH`, `AI_API_KEY`) live in `.env` and server memory
-  only. They are never sent to the browser, echoed back by API responses,
+  only. They are never sent to the UI, echoed back by API responses,
   or written to logs. Setup endpoints reject values that could inject
   extra `.env` lines (newlines / unusual characters).
 - The Telegram session file and message database stay in your data
@@ -41,15 +41,16 @@ Telegram Query is a **single-user, local-first** application:
 
 The full threat model, verified controls, and the mandatory
 pre-exposure checklist live in
-[docs/engineering/SECURITY_REVIEW.md](docs/engineering/SECURITY_REVIEW.md);
-operational hardening (readiness probes, graceful shutdown, single-process
-constraint, backups) is documented in
-[docs/engineering/PRODUCTION_DEPLOYMENT.md](docs/engineering/PRODUCTION_DEPLOYMENT.md).
+[docs/engineering/SECURITY_REVIEW.md](docs/engineering/SECURITY_REVIEW.md).
+Releases are desktop-only (decision 0010): the loopback server is an
+embedded implementation detail of the desktop app, never a deployment
+surface. The pre-desktop deployment runbook is archived at
+[docs/archive/PRODUCTION_DEPLOYMENT.md](docs/archive/PRODUCTION_DEPLOYMENT.md).
 
 ## Trust boundaries
 
 | Component | Trust level | Notes |
 |---|---|---|
-| Local browser → app | Trusted (localhost) | No auth by design |
+| App window → app (localhost) | Trusted | No auth by design |
 | App → Telegram | Your credentials | Via your own API ID/hash |
 | App → AI provider | Your choice | Only on Ask-AI, only excerpts |

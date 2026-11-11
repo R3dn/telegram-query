@@ -115,19 +115,21 @@ export function AiPanel() {
         />
       )}
 
-      <div className="ai-chat">
-        {chat.map((turn, i) => (
-          <TurnView key={i} turn={turn} onOpenSource={openSource}
-                    providerHost={appState?.ai_provider_host}
-                    providerModel={appState?.ai_model} />
-        ))}
-        {busy && (
-          <div className="ai-thinking">
-            <span className="spinner" /> {t("ai.thinking", { scope: scopeSummary })}
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
+      {(chat.length > 0 || busy) && (
+        <div className="ai-chat">
+          {chat.map((turn, i) => (
+            <TurnView key={i} turn={turn} onOpenSource={openSource}
+                      providerHost={appState?.ai_provider_host}
+                      providerModel={appState?.ai_model} />
+          ))}
+          {busy && (
+            <div className="ai-thinking">
+              <span className="spinner" /> {t("ai.thinking", { scope: scopeSummary })}
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+      )}
 
       {chat.length === 0 && (
         <div className="ai-examples">

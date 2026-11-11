@@ -50,7 +50,8 @@ injection into AI features).
    serves the full archive to whoever can reach it. Controls in place:
    loopback default, host guard, warning on unsafe bind. **Required
    before any network exposure:** an authenticating reverse proxy
-   (see `PRODUCTION_DEPLOYMENT.md` — this is the gate, not optional).
+   (see the archived `docs/archive/PRODUCTION_DEPLOYMENT.md` — this is
+   the gate, not optional).
 2. **No rate limiting.** Same posture. The AI endpoint is additionally
    bounded by the concurrency slot; the daily cap exists when cost
    matters. A reverse proxy should rate-limit if exposed.

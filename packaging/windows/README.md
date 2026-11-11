@@ -79,6 +79,18 @@ in the wiki).
   `sys.modules["desktop"] = sys.modules["__main__"]` at startup —
   without it the packaged app exits instantly or `/api/app/quit`
   can't reach the runtime.
+- **The native window needs its stack spelled out in the spec**: the
+  hidden imports `webview` / `webview.platforms.edgechromium` /
+  `webview.platforms.winforms` / `clr` / `clr_loader` (plus the
+  automatic webview + clr hooks, which collect the WebView2 interop
+  DLLs and `Python.Runtime.dll`) — and the unused pywebview backends
+  (qt/gtk/cocoa/android) go into `excludes` so a build machine with
+  PyQt installed doesn't bloat the bundle.
+- **Never let pywebview see a missing WebView2 runtime**: it silently
+  falls back to the legacy MSHTML (IE) renderer, which cannot run the
+  React UI. `desktop.py` checks the EdgeUpdate `pv` value first
+  (mirroring pywebview's own threshold) and exits with an error dialog
+  instead.
 - **The frontend version must match the backend**:
   `scripts/build_frontend.py` fails the build when
   `web/package.json` and `config.__version__` disagree.

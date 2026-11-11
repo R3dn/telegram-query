@@ -3,7 +3,7 @@
 
 Verifies the desktop contract without any human interaction:
 
-  1. launch the packaged exe (windowed, no browser),
+  1. launch the packaged exe headless (windowed build, no app window),
   2. discover the actual port from ``runtime.json`` (also proves the
      port-conflict fallback is discoverable),
   3. poll ``GET /api/health/ready`` until 200 - never a blind sleep,
@@ -13,6 +13,10 @@ Verifies the desktop contract without any human interaction:
   6. launch a second instance -> single-instance guard: exits 0 fast,
   7. ``POST /api/app/quit`` -> 200, graceful shutdown, exit code 0,
   8. no orphan process left behind.
+
+The GUI window itself (pywebview) is not exercised here - it needs a
+desktop session and a human eye; everything around it is. Set
+``TGQ_NO_WINDOW=1`` (as below) to run the same windowed exe headless.
 
 Usage:
   python scripts/test_packaged_app.py                      # dist build
@@ -161,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         data_dir = Path(tempfile.gettempdir()) / f"tgq_packaged_{os.urandom(4).hex()}"
 
     env = {**os.environ,
-           "TGQ_NO_BROWSER": "1",
+           "TGQ_NO_WINDOW": "1",
            "TGQ_STARTUP_TIMEOUT": str(int(max(30, args.timeout)))}
     if not args.real_data_dir:
         env["TG_DATA_DIR"] = str(data_dir)

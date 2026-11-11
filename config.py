@@ -64,13 +64,29 @@ def resolve_data_dir() -> Path:
 
 DATA_DIR = resolve_data_dir()
 
-# Written by the setup wizard; tests redirect this. Frozen builds keep the
-# .env in the (writable) data dir - never inside Program Files.
-ENV_FILE = DATA_DIR / ".env" if IS_FROZEN else APP_ROOT / ".env"
+
+def resolve_env_file() -> Path:
+    """Where the writable ``.env`` lives.
+
+    ``TGQ_ENV_FILE`` overrides everything (test harnesses point the app
+    at a throwaway file so a run can never read or touch a real
+    ``.env``). Frozen builds keep the ``.env`` in the (writable) data
+    dir - never inside Program Files; source runs keep it next to the
+    code, unchanged since v0.3."""
+    override = os.environ.get("TGQ_ENV_FILE", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    if IS_FROZEN:
+        return DATA_DIR / ".env"
+    return APP_ROOT / ".env"
+
+
+# Written by the setup wizard; tests redirect this.
+ENV_FILE = resolve_env_file()
 
 load_dotenv(ENV_FILE)
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 def _env(*names: str, default: str = "") -> str:

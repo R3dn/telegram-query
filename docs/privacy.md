@@ -10,7 +10,7 @@ exactly what stays local and what can leave your machine.
   Windows desktop app)
 - **Your Telegram session and credentials** — `tg_session.session` and
   `.env` (both inside the data dir)
-- **Searches, filters, AI chat history** — stored in your browser's
+- **Searches, filters, AI chat history** — stored in the app window's
   localStorage; they never reach any server
 - **Bookmarks and private notes** — stored in your database. Notes are app
   metadata: they are **never** included in AI retrieval context and are

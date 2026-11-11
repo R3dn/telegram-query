@@ -102,6 +102,8 @@ export interface Store {
   // UI
   rightTab: RightTab;
   setRightTab: (t: RightTab) => void;
+  rightOpen: boolean;
+  setRightOpen: (b: boolean) => void;
   selected: Message | null;
   select: (m: Message | null) => void;
   modal: null | "manage" | "jobs" | "settings";
@@ -414,6 +416,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // ---------- UI ----------
   const [rightTab, setRightTab] = useState<RightTab>("ai");
+  const [rightOpen, setRightOpen] = useState(true);
   const [selected, select] = useState<Message | null>(null);
   const [modal, setModal] = useState<Store["modal"]>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -432,7 +435,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       filters, setFilters, dateChip, setDateChip, searchHistory, pushSearch,
       savedSearches, refreshSaved, applySaved,
       jobs, refreshJobs,
-      rightTab, setRightTab, selected, select, modal, setModal,
+      rightTab, setRightTab, rightOpen, setRightOpen, selected, select, modal, setModal,
       wizardOpen, setWizardOpen,
       evidenceFocus, setEvidenceFocus,
     }),
@@ -441,7 +444,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
      setMode, q, runSearch, feed, hasMore, loading, loadFeed, filters,
      setFilters, dateChip, setDateChip, searchHistory, pushSearch,
      savedSearches, refreshSaved, applySaved, jobs,
-     refreshJobs, rightTab, selected, modal, wizardOpen,
+     refreshJobs, rightTab, rightOpen, selected, modal, wizardOpen,
      evidenceFocus],
   );
 

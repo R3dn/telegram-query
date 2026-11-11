@@ -38,3 +38,17 @@ def test_provider_host_not_key():
     host = config.settings.ai_provider_host
     assert "test-ai-key" not in host
     assert config.settings.ai_provider_host == "localhost:1"
+
+
+def test_env_file_override(monkeypatch, tmp_path):
+    # TGQ_ENV_FILE points the app at a throwaway .env (test harnesses,
+    # e2e): a run must never read or write a real one.
+    target = tmp_path / "isolated.env"
+    monkeypatch.setenv("TGQ_ENV_FILE", str(target))
+    assert config.resolve_env_file() == target
+
+
+def test_env_file_default_is_repo_env(monkeypatch):
+    # source runs keep .env next to the code, unchanged
+    monkeypatch.delenv("TGQ_ENV_FILE", raising=False)
+    assert config.resolve_env_file() == config.APP_ROOT / ".env"

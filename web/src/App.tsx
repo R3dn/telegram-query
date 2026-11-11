@@ -35,7 +35,7 @@ function shouldShowWizard(
 
 export default function App() {
   const store = useStore();
-  const { appState, wizardOpen, setWizardOpen, modal, setModal, mode } = store;
+  const { appState, wizardOpen, setWizardOpen, modal, setModal, mode, rightOpen } = store;
 
   const [wizardSeen, setWizardSeen] = useState(
     () => localStorage.getItem("tgq-wizard-seen") === "1",
@@ -66,7 +66,7 @@ export default function App() {
 
   return (
     <>
-      <div className="app">
+      <div className={`app ${!rightOpen ? "hide-right" : ""}`}>
         <Sidebar />
         <main className="center">
           {mode === "discover" ? (
@@ -112,12 +112,11 @@ export default function App() {
 }
 
 function RightPanel() {
-  const { rightTab, setRightTab } = useStore();
+  const { rightTab, setRightTab, selected, rightOpen, setRightOpen } = useStore();
   const { t } = useLang();
   const [width, setWidth] = useState(() =>
     parseInt(localStorage.getItem("tgq-right-w") ?? "360", 10),
   );
-  const [hidden, setHidden] = useState(false);
   const dragging = useRef(false);
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -152,8 +151,8 @@ function RightPanel() {
 
   return (
     <aside
-      className={`right ${hidden && !narrow ? "hidden" : ""}`}
-      style={narrow ? undefined : { width, maxWidth: "50vw" }}
+      className={`right ${!rightOpen && !narrow ? "hidden" : ""}`}
+      style={narrow ? undefined : { width }}
     >
       {!narrow && (
         <div
@@ -163,30 +162,33 @@ function RightPanel() {
         />
       )}
       <div className="right-tabs">
+        <div className="tab-pills">
+          <button
+            className={`tab ${rightTab === "ai" ? "on" : ""}`}
+            onClick={() => setRightTab("ai")}
+          >
+            <Ic.Sparkles size={14} /> {t("panel.askAi")}
+          </button>
+          <button
+            className={`tab ${rightTab === "details" ? "on" : ""}`}
+            disabled={!selected}
+            title={!selected ? t("panel.detailsHint") : undefined}
+            onClick={() => setRightTab("details")}
+          >
+            {t("panel.details")}
+          </button>
+        </div>
         <button
-          className={`tab ${rightTab === "ai" ? "on" : ""}`}
-          onClick={() => setRightTab("ai")}
-        >
-          <Ic.Sparkles size={14} /> {t("panel.askAi")}
-        </button>
-        <button
-          className={`tab ${rightTab === "details" ? "on" : ""}`}
-          onClick={() => setRightTab("details")}
-        >
-          {t("panel.details")}
-        </button>
-        <span style={{ flex: 1 }} />
-        <button
-          className="btn ghost sm"
-          title={hidden ? t("panel.show") : t("panel.hide")}
+          className="btn ghost sm icon"
+          title={!rightOpen ? t("panel.show") : t("panel.hide")}
           onClick={() => {
             if (narrow) document.body.classList.remove("tgq-right-open");
-            else setHidden((h) => !h);
+            else setRightOpen(!rightOpen);
           }}
         >
           {narrow
-            ? <Ic.Close size={13} />
-            : hidden
+            ? <Ic.Close size={14} />
+            : !rightOpen
               ? <Ic.PanelRightOpen size={14} />
               : <Ic.PanelRightClose size={14} />}
         </button>
@@ -199,7 +201,7 @@ function RightPanel() {
 }
 
 function MobileNav() {
-  const { setMode, setRightTab, setModal, mode } = useStore();
+  const { setMode, setRightTab, setRightOpen, setModal, mode } = useStore();
   const { t } = useLang();
 
   const open = (cls: "tgq-side-open" | "tgq-right-open") => {
@@ -225,7 +227,7 @@ function MobileNav() {
         <button onClick={() => open("tgq-side-open")}>
           <span className="bic"><Ic.Users size={19} /></span> {t("nav.groups")}
         </button>
-        <button onClick={() => { setRightTab("ai"); open("tgq-right-open"); }}>
+        <button onClick={() => { setRightTab("ai"); setRightOpen(true); open("tgq-right-open"); }}>
           <span className="bic"><Ic.Sparkles size={19} /></span> {t("nav.askAi")}
         </button>
         <button onClick={() => setModal("jobs")}>

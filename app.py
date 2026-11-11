@@ -143,9 +143,9 @@ async def lifespan(app: FastAPI):
     if host and host not in ("127.0.0.1", "localhost", "::1"):
         log.warning(
             "HOST=%s: the API serves your complete message archive with NO "
-            "authentication. Bind to a loopback address unless you have "
-            "put an auth proxy in front (see docs/engineering/"
-            "PRODUCTION_DEPLOYMENT.md).", host)
+            "authentication. Keep the bind on loopback - the server is an "
+            "embedded detail of the desktop app, not a deployment surface "
+            "(see SECURITY.md; decision 0010).", host)
     yield
     # graceful shutdown: ask the running job to stop at its next
     # checkpoint and give it a moment to save progress. SQLite

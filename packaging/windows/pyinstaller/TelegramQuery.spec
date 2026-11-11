@@ -4,7 +4,8 @@
 Produces a windowed, console-free directory (TelegramQuery/) containing
 TelegramQuery.exe and all support files. The built React frontend lives at
 web/dist inside the support dir, matching the frozen path resolution in
-config.py.
+config.py. The exe serves that UI inside its own native window (pywebview
+/ Edge WebView2); the hidden imports below bundle the window stack.
 """
 
 import sys
@@ -37,6 +38,12 @@ _hidden = [
     "fastapi", "pydantic",
     # env loader
     "dotenv",
+    # Native app window: pywebview (Edge WebView2 + pythonnet WinForms).
+    "webview", "webview.platforms.edgechromium", "webview.platforms.winforms",
+    "clr", "clr_loader",
+    # System tray icon (minimize-to-tray)
+    "pystray",
+    "PIL", "PIL.Image",
     # Telethon crypto accelerator (optional at runtime, bundled here so
     # packaged sync/decryption runs at native speed instead of Telethon's
     # slow pure-Python fallback)
@@ -47,12 +54,19 @@ a = Analysis(
     [str(repo / "desktop.py")],
     pathex=[str(repo)],
     binaries=[],
-    datas=[(str(repo / "web" / "dist"), "web/dist")],
+    datas=[(str(repo / "web" / "dist"), "web/dist"),
+           (str(repo / "packaging" / "windows" / "assets" / "app.ico"),
+            "packaging/windows/assets")],
     hiddenimports=_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["PIL", "matplotlib", "numpy", "pandas", "pytest", "tkinter"],
+    excludes=["matplotlib", "numpy", "pandas", "pytest", "tkinter",
+              # pywebview backends this app never uses (Windows ships the
+              # edgechromium/winforms path); keeps local builds small even
+              # when PyQt & co. happen to be installed on the build machine
+              "webview.platforms.qt", "webview.platforms.gtk",
+              "webview.platforms.cocoa", "webview.platforms.android"],
     noarchive=False,
     optimize=1,
 )

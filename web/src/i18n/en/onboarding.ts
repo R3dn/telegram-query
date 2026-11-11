@@ -12,6 +12,7 @@ export const dict: Dict = {
   "onboarding.step.sync": "First sync",
   "onboarding.allSet": "Everything is set up — you can close this wizard.",
   "onboarding.startUsing": "Start using {app}",
+  "onboarding.editCreds": "Change API credentials…",
   "onboarding.setupComplete": "Setup complete — your archive is building",
   "onboarding.continue": "Continue",
   "onboarding.skip": "Skip for now",

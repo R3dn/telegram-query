@@ -5,7 +5,7 @@ session, zero external services.
 
 ```
 ┌────────────┐     ┌──────────────────────────────────────────────┐
-│  Browser    │     │              python app.py                    │
+│ App window  │     │              python app.py                    │
 │ React SPA   │────▶│  FastAPI  (api/ routers)                     │
 │ (web/dist)  │ /api│  ├─ general.py    app state / health          │
 └────────────┘     │  ├─ auth.py       phone/code/2FA login         │
@@ -59,7 +59,7 @@ session, zero external services.
 | File | Role |
 |---|---|
 | `config.py` | Single `Settings` object; env parsing, aliases, path resolution, normalization level, model routing (`AI_MODEL_EXTRACT/SYNTH/EMBED` with `AI_MODEL` fallback), daily AI cap. v1.0: frozen-aware paths — source runs keep `<repo>/data`, packaged builds move mutable data to `%LOCALAPPDATA%\TelegramQuery` and the `.env` there; `reload_settings()` after migration |
-| `desktop.py` | v1.0 desktop runtime for packaged builds: named-mutex single instance, legacy-archive migration hook, rotating file log, loopback-only Uvicorn in a worker thread, busy-port fallback (actual port discoverable via `runtime.json`), health-gated browser open (no blind sleeps), explicit quit (`POST /api/app/quit`) with graceful shutdown, native error dialogs pointing at the log |
+| `desktop.py` | v1.0 desktop runtime for packaged builds: named-mutex single instance, legacy-archive migration hook, rotating file log, loopback-only Uvicorn in a worker thread, busy-port fallback (actual port discoverable via `runtime.json`), native window open via pywebview/WebView2 with minimize-to-tray (pystray), explicit quit (`POST /api/app/quit`) with graceful shutdown, native error dialogs pointing at the log. Browser fallback was removed — the app is desktop-only |
 | `migration.py` | v1.0 copy-based archive migration into the user data dir (never overwrites: backup, idempotent, interrupt-safe, SQLite backup-API restore, preserves session + settings) |
 | `app.py` | Thin entry: routers, static serving (immutable hashed assets, v9 security headers), startup threads, graceful shutdown (v9: cancel running job, clean state), post-sync + tick hook registration, upgrade backfill jobs (reindex, discovery), non-loopback bind warning |
 | `api/` | HTTP routers grouped by domain; each opens its own DB connection; `/api/health/ready` readiness (v9) |
@@ -201,7 +201,7 @@ TelegramQuery-Setup-x64.exe        Burn bootstrapper (license UI, chains
   loopback bind, the API never returns secrets to the frontend, and
   the bootstrapper runs the same MSI a script would (`msiexec /i …
   /qn`) — no service, no auto-start, no background anything.
-- **Honest lifecycle**: health-gated browser open, discoverable port
+- **Honest lifecycle**: health-gated window open, discoverable port
   (`runtime.json`), single-instance mutex, graceful shutdown through
   the same FastAPI lifespan as source runs, and crash visibility via a
   native dialog + rotating log instead of a silent exit.

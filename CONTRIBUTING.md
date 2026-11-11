@@ -23,7 +23,11 @@ built `web/dist` is committed, so backend-only contributors can skip it).
 1. **Keep it local-first.** The archive, session, and credentials stay on
    the user's machine. AI calls only send the excerpts a question retrieves.
 2. **Run the checks before pushing:** `ruff check .`, `pytest`, and in
-   `web/`: `npm run typecheck && npm test && npm run build`.
+   `web/`: `npm run typecheck && npm test && npm run build`. For
+   changes to the desktop runtime (`desktop.py`), packaging, or the
+   wizard/navigation shell, also run
+   `python scripts/e2e_smoke_desktop.py` (needs `pip install
+   playwright && python -m playwright install chromium`).
 3. **Never commit** real session files, databases, `.env`, or message data
    from a real archive. Use `python scripts/seed_demo.py` to test with
    synthetic data.
@@ -46,6 +50,7 @@ built `web/dist` is committed, so backend-only contributors can skip it).
 | `scripts/seed_demo.py` | synthetic demo archive (testing, screenshots) |
 | `scripts/mock_ai_server.py` | deterministic OpenAI-compatible fake for E2E |
 | `scripts/e2e_test.py` | full-journey E2E against a running app + mock provider |
+| `scripts/e2e_smoke_desktop.py` | interactive desktop smoke test (wizard, navigation, theme/language across a window restart, console hygiene) |
 | `scripts/benchmark.py` | repeatable performance harness (5k/50k/500k rows) |
 | `scripts/backup_db.py` | online, consistent archive snapshot |
 

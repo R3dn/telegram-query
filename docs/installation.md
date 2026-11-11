@@ -18,17 +18,27 @@ other dependencies are required.
 
 What to expect on first launch:
 
+- The app opens in its **own window** - a native desktop app, not a
+  browser tab. It needs the Microsoft Edge WebView2 Runtime, which is
+  preinstalled on Windows 10/11. If it is ever missing, the app shows
+  an error dialog with the download link (<https://aka.ms/webview2>) and
+  exits.
 - Data lives in `%LOCALAPPDATA%\TelegramQuery` (never inside Program
-  Files): your archive database, Telegram session, `.env` settings, and
-  logs (`%LOCALAPPDATA%\TelegramQuery\logs\app.log`).
+  Files): your archive database, Telegram session, `.env` settings,
+  WebView2 profile data, and logs
+  (`%LOCALAPPDATA%\TelegramQuery\logs\app.log`).
 - The app binds to `127.0.0.1` only — it is reachable from your machine
-  and nothing else. If port 8000 is busy it picks a free one and still
-  opens your browser at the right address.
-- One instance at a time: a second launch focuses the running one.
+  and nothing else. If port 8000 is busy it picks a free one; the
+  window still opens at the right address.
+- One instance at a time: a second launch focuses the running window.
 - The server API starts, the health check passes, and only then does
-  the browser open — a slow disk never produces a dead tab.
-- Quit via the in-app Exit action (the desktop runtime shuts down
-  gracefully and never leaves orphan processes).
+  the window appear — a slow disk never produces a blank window.
+- Close the window or use the in-app Exit action — either way the
+  desktop runtime shuts down gracefully and never leaves orphan
+  processes.
+- Minimize the window and it **hides to the system tray** (notification
+  area). Left-click the tray icon to restore it, or right-click for the
+  menu. The tray icon shows the same Paper-Plane mark as the app.
 
 **Uninstalling** removes the application and shortcuts but *keeps* your
 data in `%LOCALAPPDATA%\TelegramQuery` — reinstall and you are right back

@@ -1,5 +1,12 @@
 # Production Deployment — Telegram Query
 
+> **Archived 2026-11-12 — historical reference.** Telegram Query now
+> releases desktop-only (decision 0010,
+> [docs/decisions/README.md](../decisions/README.md)): the loopback
+> server is an embedded implementation detail of the desktop runtime,
+> never a deployment surface. This pre-desktop runbook is kept for
+> historical reference only.
+
 Target: a single-user, self-hosted archive on a machine you control
 (laptop, desktop, small home server). The design constraints below are
 **load-bearing** — violating them breaks data or the Telegram session.

@@ -18,7 +18,7 @@ body {
   overflow: hidden;
 }
 
-#root { height: 100%; }
+#root { height: 100%; width: 100%; }
 
 button, input, select, textarea { font-family: inherit; font-size: var(--fs-body); }
 
@@ -71,6 +71,8 @@ button, input, select, textarea { font-family: inherit; font-size: var(--fs-body
 .btn.danger:hover:not(:disabled) { background: var(--err-soft); }
 .btn.sm { padding: 3px 10px; font-size: var(--fs-small); border-radius: var(--r-s); }
 .btn svg { flex: none; }
+.btn.icon { padding: 5px; aspect-ratio: 1; }
+.btn.sm.icon { padding: 4px; }
 
 /* ---------- inputs ---------- */
 .input, select.input, textarea.input {
@@ -178,11 +180,12 @@ label.field > span {
 
 /* ---------- modal ---------- */
 .modal-overlay {
-  position: fixed; inset: 0; z-index: 100;
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 100;
   background: rgba(5, 8, 14, .6);
-  backdrop-filter: blur(3px);
+  /* backdrop-filter omitted — same WebView2 invisibility risk as wizard */
   display: flex; align-items: center; justify-content: center;
   padding: 20px;
+  opacity: 1;
   animation: fade-in var(--dur-1) var(--ease);
 }
 .modal {
@@ -190,6 +193,7 @@ label.field > span {
   border-radius: var(--r-xl); box-shadow: var(--shadow-3);
   width: min(640px, 100%); max-height: 86vh;
   display: flex; flex-direction: column;
+  opacity: 1;
   animation: pop-in var(--dur-2) var(--ease);
 }
 .modal.wide { width: min(840px, 100%); }
@@ -205,8 +209,8 @@ label.field > span {
 }
 .modal-foot .btn.primary { margin-inline-start: auto; }
 
-@keyframes fade-in { from { opacity: 0; } }
-@keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(.985); } to { opacity: 1; transform: none; } }
 
 /* ---------- toasts ---------- */
 .toasts {
@@ -239,7 +243,27 @@ label.field > span {
 .empty h4 { margin: 0; color: var(--text); font-size: var(--fs-subhead); font-weight: 700; }
 .empty p { margin: 0 0 10px; font-size: var(--fs-body); max-width: 480px; line-height: 1.6; }
 
-/* ---------- misc ---------- */
+/* Compact empty state for narrow panels (AI panel, details panel).
+   The 64px/30px padding of the default .empty class is overwhelming
+   inside a ~360px right-body.  Switch from center alignment (creates
+   ragged whitespace on short lines) to a natural start-aligned block
+   so the text fills the width.  Also shrink icon, title and tighten
+   vertical gaps so the panel feels dense, not hollow. */
+.right-body .empty {
+  padding: 16px 0 10px;
+  align-items: flex-start;
+  text-align: start;
+  gap: 4px;
+}
+.right-body .empty .ic { width: 40px; height: 40px; margin-bottom: 0; align-self: center; }
+.right-body .empty h4 { align-self: center; margin: 0; font-size: var(--fs-body); }
+.right-body .empty p { max-width: none; margin: 0 0 4px; font-size: var(--fs-small); line-height: 1.45; }
+
+/* Tighter right-body padding when showing the AI panel so examples,
+   scope chips and empty state breathe less and fill the width better. */
+.right-body:has(.ai-panel) { padding: 10px 8px; }
+
+/* ================= misc ================= */
 .badge {
   font-size: var(--fs-caption); font-weight: 600; padding: 1px 8px;
   border-radius: var(--r-pill); border: 1px solid var(--border);

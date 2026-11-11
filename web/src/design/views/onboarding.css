@@ -1,9 +1,13 @@
 /* Onboarding wizard, setup forms, and its dialogs. */
 .wizard-overlay {
-  position: fixed; inset: 0; z-index: 150;
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 150;
   background: rgba(5, 8, 14, .66);
-  backdrop-filter: blur(3px);
+  /* Note: backdrop-filter is intentionally omitted.  On some WebView2
+     / GPU combinations it causes the overlay (and its children) to
+     render completely invisible, which makes the wizard appear to
+     "do nothing" when clicked. The solid dark background is enough. */
   display: flex; align-items: center; justify-content: center; padding: 20px;
+  opacity: 1; /* always visible – the animation is purely decorative */
   animation: fade-in var(--dur-1) var(--ease);
 }
 .wizard {
@@ -11,6 +15,7 @@
   border-radius: var(--r-xl); box-shadow: var(--shadow-3);
   width: min(680px, 100%); max-height: 88vh;
   display: flex; flex-direction: column;
+  opacity: 1;
   animation: pop-in var(--dur-2) var(--ease);
 }
 .wizard-head {
@@ -22,8 +27,11 @@
   display: inline-flex; gap: 6px; align-items: center;
   font-size: var(--fs-caption); color: var(--faint); font-weight: 600;
   border: 1px solid var(--border-soft); border-radius: var(--r-pill);
-  padding: 2px 11px;
+  padding: 2px 11px; background: none; cursor: default;
 }
+.wstep:disabled { opacity: .5; }
+.wstep:not(:disabled) { cursor: pointer; }
+.wstep:not(:disabled):hover { border-color: var(--border); color: var(--dim); }
 .wstep b {
   width: 16px; height: 16px; border-radius: 50%;
   background: var(--surface-2); font-size: 10px;
@@ -34,7 +42,8 @@
 .wstep.on b { background: var(--accent); color: var(--accent-fg); }
 .wstep.done { color: var(--good); }
 .wstep.done b { background: var(--good-soft); color: var(--good); }
-.wizard-body { padding: 20px 22px 22px; overflow-y: auto; }
+.wstep:not(:disabled).done:hover { border-color: var(--good); }
+.wizard-body { padding: 20px 22px 22px; overflow-y: auto; flex: 1; min-height: 0; }
 .wizard-body h3 { margin: 0 0 6px; font-size: var(--fs-title); font-weight: 700; letter-spacing: -.01em; }
 .wizard-body .dim { color: var(--dim); font-size: var(--fs-small); margin: 0 0 10px; line-height: 1.6; }
 .wizard-list {

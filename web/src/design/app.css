@@ -1,9 +1,28 @@
 /* Telegram Query - application shell + browse workspace.
    Frozen foundation: view styling lives in design/views/*.css. */
 
+/* view imports (frozen list: parallel view work never edits this).
+   NOTE: this block must stay ABOVE all other rules in this file.
+   CSS drops any @import that follows other statements, so when this
+   list lived at the bottom of the file, postcss silently removed
+   every view stylesheet (wizard overlay, discover rows, ...) from
+   production builds. */
+@import "./views/bookmarks.css";
+@import "./views/deals.css";
+@import "./views/decisions.css";
+@import "./views/digests.css";
+@import "./views/discover.css";
+@import "./views/entities.css";
+@import "./views/faqs.css";
+@import "./views/onboarding.css";
+@import "./views/research.css";
+@import "./views/system.css";
+@import "./views/watch.css";
+
 .app {
   display: grid;
-  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--right-w);
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) auto;
+  width: 100%;
   height: 100%;
   min-height: 0;
 }
@@ -277,23 +296,35 @@ mark {
 /* ================= right panel ================= */
 .right {
   background: var(--surface); border-inline-start: 1px solid var(--border-soft);
-  display: flex; flex-direction: column; min-height: 0; position: relative;
+  display: flex; flex-direction: column;
+  min-width: 280px; min-height: 0; position: relative;
 }
 .right.hidden { display: none; }
 .right-tabs {
-  display: flex; gap: 2px; padding: 6px 10px 0;
-  border-bottom: 1px solid var(--border-soft); align-items: end;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 10px; border-bottom: 1px solid var(--border-soft);
+}
+.right-tabs .tab-pills {
+  display: inline-flex; gap: 2px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-m); padding: 2px;
 }
 .right-tabs button.tab {
-  background: none; border: none; color: var(--faint);
-  padding: 7px 12px 9px; font-size: var(--fs-small); font-weight: 600;
-  border-bottom: 2px solid transparent;
+  background: none; border: none; color: var(--dim);
+  padding: 5px 12px; font-size: var(--fs-small); font-weight: 600;
+  border-radius: var(--r-s); cursor: pointer;
   display: inline-flex; align-items: center; gap: 6px;
-  transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+  transition: background var(--dur-1) var(--ease),
+              color var(--dur-1) var(--ease),
+              box-shadow var(--dur-1) var(--ease);
 }
-.right-tabs button.tab:hover { color: var(--dim); }
+.right-tabs button.tab:hover:not(:disabled) { color: var(--text); }
 .right-tabs button.tab.on {
-  color: var(--text); border-bottom-color: var(--accent);
+  background: var(--surface); color: var(--text);
+  box-shadow: var(--shadow-1);
+}
+.right-tabs button.tab:disabled {
+  opacity: .35; cursor: not-allowed; color: var(--faint);
 }
 .right-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; }
 .resize-handle {
@@ -365,21 +396,34 @@ mark {
 .src-sender { color: var(--dim); flex: none; max-width: 22%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .src-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
 .ai-thinking { display: flex; gap: 8px; align-items: center; color: var(--dim); font-size: var(--fs-small); padding: 10px 0; }
-.ai-examples { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 0 12px; }
-.ai-input-row { display: flex; gap: 8px; margin-top: 8px; }
+.ai-examples { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 0 6px; }
+.ai-examples .chip {
+  font-size: var(--fs-small); padding: 4px 10px;
+  color: var(--dim); background: var(--surface-2); border-color: var(--border);
+}
+.ai-examples .chip:hover { color: var(--text); background: var(--surface); border-color: var(--border-soft); }
+.ai-input-row { display: flex; gap: 8px; margin-top: 4px; }
 .ai-input-row textarea { flex: 1; }
+.ai-scope-row {
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  padding: 0 14px 2px; font-size: var(--fs-caption); color: var(--faint);
+}
+.ai-scope-row .label { display: none; }
+.ai-scope-row .chip { padding: 2px 8px; font-size: var(--fs-caption); }
+.ai-scope-row .chip.on { font-weight: 600; }
 .ai-disclosure {
   display: flex; gap: 8px; align-items: center; justify-content: space-between;
-  color: var(--faint); font-size: var(--fs-caption); margin-top: 10px;
+  color: var(--faint); font-size: var(--fs-caption); margin-top: 8px;
   flex-wrap: wrap;
 }
 .ai-disclosure b { color: var(--dim); }
-.ai-scope-row {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  padding: 6px 14px 0; font-size: var(--fs-caption);
-}
-.ai-scope-row .label { flex: none; }
 .save-summary { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+
+/* Collapse the right column when the panel is explicitly hidden on desktop
+   so the grid doesn't leave a 360px empty gap. On mobile the panel is
+   already position:fixed with body-class control, so this only matters
+   above the 1100px breakpoint. */
+.app.hide-right { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
 
 /* ================= mobile ================= */
 .bottom-nav { display: none; }
@@ -436,19 +480,6 @@ mark {
   .msg-card { padding: 8px 14px 9px; }
   .view-head { padding: 14px 14px 10px; }
 }
-
-/* view imports (frozen list: parallel view work never edits this) */
-@import "./views/bookmarks.css";
-@import "./views/deals.css";
-@import "./views/decisions.css";
-@import "./views/digests.css";
-@import "./views/discover.css";
-@import "./views/entities.css";
-@import "./views/faqs.css";
-@import "./views/onboarding.css";
-@import "./views/research.css";
-@import "./views/system.css";
-@import "./views/watch.css";
 
 /* ================= shared view toolbar ================= */
 /* Used by Bookmarks, Deals, Decisions, Research, Watchlists, Alerts,

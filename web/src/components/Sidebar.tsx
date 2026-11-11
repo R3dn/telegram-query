@@ -13,7 +13,7 @@ export function Sidebar() {
   const { t, lang, setLang } = useLang();
   const {
     groups, selection, toggleGroup, clearSelection,
-    jobs, appState, setModal, setWizardOpen, setRightTab, setMode,
+    jobs, appState, setModal, setWizardOpen, setRightTab, setRightOpen, setMode,
     savedSearches, mode, theme, toggleTheme,
   } = store;
   const [filter, setFilter] = useState("");
@@ -60,6 +60,7 @@ export function Sidebar() {
 
   const askAi = () => {
     setRightTab("ai");
+    setRightOpen(true);
     if (window.matchMedia("(max-width: 1100px)").matches) {
       document.body.classList.add("tgq-right-open");
     }

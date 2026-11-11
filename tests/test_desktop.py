@@ -57,10 +57,31 @@ def test_pick_port_falls_back_when_busy():
 # ---------------------------------------------------------------------------
 
 def test_runtime_file_roundtrip(data_dir):
-    desktop.write_runtime_file(18500)
+    desktop.write_runtime_file(18500, desktop.UI_WINDOW)
     raw = (data_dir / "runtime.json").read_text(encoding="utf-8")
     assert json.loads(raw)["port"] == 18500
+    assert json.loads(raw)["ui"] == desktop.UI_WINDOW
     assert desktop.read_runtime_port() == 18500
+    assert desktop.read_runtime_ui() == desktop.UI_WINDOW
+
+
+def test_runtime_file_ui_modes_roundtrip(data_dir):
+    for mode in (desktop.UI_WINDOW, desktop.UI_NONE):
+        desktop.write_runtime_file(18501, mode)
+        assert desktop.read_runtime_ui() == mode
+
+
+def test_runtime_file_without_ui_defaults_to_window(data_dir):
+    # pre-v1.1 runtime files have no "ui" field: default to window
+    (data_dir / "runtime.json").write_text(
+        '{"port": 8000, "pid": 1}', encoding="utf-8")
+    assert desktop.read_runtime_ui() == desktop.UI_WINDOW
+
+
+def test_runtime_file_garbage_ui_defaults_to_window(data_dir):
+    (data_dir / "runtime.json").write_text(
+        '{"port": 8000, "pid": 1, "ui": "hologram"}', encoding="utf-8")
+    assert desktop.read_runtime_ui() == desktop.UI_WINDOW
 
 
 def test_read_runtime_port_tolerates_garbage(data_dir):
@@ -278,3 +299,122 @@ def test_data_import_into_empty_archive(api_client, tmp_path, monkeypatch):
     assert resp.json()["migration"]["status"] == "ok"
     state = api_client.get("/api/app/state").json()
     assert state["messages"] == 2
+
+
+# ---------------------------------------------------------------------------
+# UI delivery: native window vs browser fallback vs headless
+# ---------------------------------------------------------------------------
+
+def test_ui_mode_defaults_to_the_native_window(monkeypatch):
+    for var in ("TGQ_NO_WINDOW", "TGQ_NO_BROWSER"):
+        monkeypatch.delenv(var, raising=False)
+    assert desktop.ui_mode([]) == desktop.UI_WINDOW
+
+
+def test_ui_mode_headless_via_flags_and_env(monkeypatch):
+    for var in ("TGQ_NO_WINDOW", "TGQ_NO_BROWSER"):
+        monkeypatch.delenv(var, raising=False)
+    assert desktop.ui_mode(["--no-window"]) == desktop.UI_NONE
+    assert desktop.ui_mode(["--no-browser"]) == desktop.UI_NONE  # legacy
+    monkeypatch.setenv("TGQ_NO_WINDOW", "1")
+    assert desktop.ui_mode([]) == desktop.UI_NONE
+    monkeypatch.delenv("TGQ_NO_WINDOW")
+    monkeypatch.setenv("TGQ_NO_BROWSER", "1")                    # legacy
+    assert desktop.ui_mode([]) == desktop.UI_NONE
+
+
+class _StubKey:
+    def __init__(self, pv):
+        self.pv = pv
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _StubWinreg:
+    """Only the Evergreen runtime key answers; every other lookup fails
+    like a missing registry key would."""
+
+    def __init__(self, pv):
+        self.pv = pv
+
+    def OpenKey(self, hive, subkey):
+        if desktop._WEBVIEW2_CHANNELS[0] in subkey:
+            return _StubKey(self.pv)
+        raise OSError("missing key")
+
+    def QueryValueEx(self, key, name):
+        assert name == "pv"
+        return (key.pv, None)
+
+
+@pytest.mark.parametrize("pv,expected", [
+    ("120.0.2210.61", True),      # a modern Evergreen runtime
+    ("86.0.622.0", True),         # pywebview's exact floor
+    ("85.0.564.34", False),       # below the floor - MSHTML territory
+    ("0.0.0.0", False),           # registered but not actually installed
+    ("unknown", False),           # unparseable
+])
+def test_webview2_detection_reads_the_edgeupdate_pv(pv, expected, monkeypatch):
+    import sys as _sys
+    import types
+
+    class _Mod(types.ModuleType):
+        pass
+
+    mod = _Mod("winreg")
+    stub = _StubWinreg(pv)
+    mod.OpenKey = stub.OpenKey
+    mod.QueryValueEx = stub.QueryValueEx
+    mod.HKEY_CURRENT_USER = 2
+    mod.HKEY_LOCAL_MACHINE = 1
+    monkeypatch.setitem(_sys.modules, "winreg", mod)
+    ok, detail = desktop.webview2_runtime_version()
+    assert ok is expected
+    if expected:
+        assert pv in detail
+
+
+# ---------------------------------------------------------------------------
+# Second launch: surface the running instance
+# ---------------------------------------------------------------------------
+
+def _patch_ready_instance(monkeypatch, focus_result):
+    monkeypatch.setattr(desktop, "read_runtime_port", lambda: 8901)
+    monkeypatch.setattr(desktop, "_get",
+                         lambda url, timeout=2.0: (True, 200, ""))
+    monkeypatch.setattr(desktop, "read_runtime_ui", lambda: desktop.UI_WINDOW)
+    monkeypatch.setattr(desktop, "_focus_existing_window",
+                         lambda timeout_s=10.0: focus_result)
+
+
+def test_second_launch_focuses_the_running_window(monkeypatch):
+    _patch_ready_instance(monkeypatch, True)
+    assert desktop.focus_existing() is True
+
+
+def test_second_launch_quiet_surfaces_nothing(monkeypatch):
+    _patch_ready_instance(monkeypatch, True)
+    assert desktop.focus_existing(quiet=True) is True
+
+
+# ---------------------------------------------------------------------------
+# System tray
+# ---------------------------------------------------------------------------
+
+def test_tray_icon_loads_from_ico():
+    img = desktop._tray_icon_image()
+    assert img is not None
+    assert img.size[0] > 0 and img.size[1] > 0
+
+
+def test_stop_tray_is_safe_when_not_started():
+    old = desktop._TRAY
+    desktop._TRAY = None
+    try:
+        desktop._stop_tray()
+    finally:
+        desktop._TRAY = old

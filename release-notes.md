@@ -1,4 +1,35 @@
-# Release notes — 1.0.0
+# Release notes
+
+## 1.0.1 (2026-11-12)
+
+Desktop-only point release. From this release on, the Windows desktop
+app is the only distribution target (decision 0010) — the loopback
+server is an embedded detail of the desktop runtime, never a deployment
+surface.
+
+- **Native window + tray, hardened**: the app opens in its own WebView2
+  window; minimize goes to the tray; the taskbar shows the app's own
+  mark (AUMID grouping; `pywin32` is now a declared dependency so the
+  Start Menu shortcut never silently skips).
+- **Wizard fixed in production builds**: a CSS `@import` placed after
+  other rules had silently dropped every per-view stylesheet from
+  production bundles — the wizard overlay (and view polish) now
+  renders as designed.
+- **Right panel flush to the window edge**: the shell grid follows the
+  panel's actual width (drag-resize included) instead of a fixed
+  360px cell; no `50vw` cap; no blank strip, no ghost column when
+  hidden; Ask AI reopens reliably after closing; no dead space above
+  the example chips. Verified 1280–1920px, zero console errors
+  (41/41 desktop e2e checks).
+- **Docs**: deployment runbook archived; README and security docs
+  state the desktop-only policy. Dev/test surface unchanged
+  (`python app.py`, `--no-window`/`TGQ_NO_WINDOW`).
+
+Upgrading from 1.0.0: run the installer over the old one — data lives
+in `%LOCALAPPDATA%\TelegramQuery` and survives upgrade and uninstall by
+design.
+
+## 1.0.0 (2026-11-11)
 
 Telegram Query 1.0.0 is the first desktop release: a polished Windows
 installer, a full UI/UX overhaul, and a bilingual workspace — with the
@@ -18,12 +49,27 @@ same local-first engine underneath.
   upgrade** by design.
 - Verified end-to-end on a clean machine: install → launch → health
   check → single-instance focus → explicit quit → uninstall keeps
-  data; port conflicts fall back to a free port (the browser still
+  data; port conflicts fall back to a free port (the window still
   opens at the right address); a second launch focuses the first.
 
 ## Desktop runtime (packaged builds)
 
-- Health-gated startup: the browser opens only after
+- **A native app window, not a browser tab**: the app opens in its own
+  window (Microsoft Edge WebView2, preinstalled on Windows 10/11). A
+  missing WebView2 runtime shows an error dialog with the download
+  link — there is no browser mode. The UI's localStorage (theme,
+  language, panel state) persists in `<data>/webview` across window
+  restarts.
+- **Minimize to the system tray**: minimizing hides the window from
+  the taskbar; left-click the tray icon to restore it, or right-click
+  for the menu (Open / Exit). The tray shows the same Paper-Plane
+  mark as the executable.
+- **Own window icon everywhere**: the taskbar and title bar show the
+  app's mark — including a source run of `python desktop.py`. Windows
+  requires a Start Menu shortcut carrying the same AppUserModelID for
+  the system to group the icon by the app rather than by the Python
+  executable; the runtime creates this shortcut automatically.
+- Health-gated startup: the window opens only after
   `/api/health/ready` answers — never a blind sleep.
 - Loopback-only binding enforced (a non-loopback `HOST` is overridden
   with a warning); busy port 8000 falls back to a free port, recorded
@@ -61,6 +107,11 @@ same local-first engine underneath.
   hundreds of rows.
 - Keyboard access refined (visible focus rings, `/` to focus search),
   empty/loading/error states restyled everywhere.
+- Toolbar and panel polish: icon-only ghost buttons for secondary
+  actions, redundant View buttons removed (`trend-row` text is already
+  clickable), pill-style right-panel segmented tabs, compact AI scope
+  chips, denser Discover trending rows, and Discover subtitle reduced
+  to a tooltip.
 
 ## Engineering
 
@@ -71,12 +122,25 @@ same local-first engine underneath.
   `scripts/test_packaged_app.py` exercises the packaged exe end to
   end (launch, port discovery, health payload, data isolation,
   single instance, graceful quit).
+- **Interactive desktop smoke test** (`scripts/e2e_smoke_desktop.py`):
+  the real desktop runtime driven through its UI — setup wizard with
+  typed + submitted credentials (re-opened from the sidebar footer
+  link like a returning user), click-navigation across every view
+  and the Ask AI / Jobs / Settings modals, theme & language toggles
+  verified across a full window restart, second-launch focus, and
+  graceful quit, with a hard zero-console-errors gate. Fully isolated
+  (own data dir + `TGQ_ENV_FILE`), so it never touches real data.
 - CI now builds and tests the Windows installers on every push.
 - Telethon crypto acceleration (`cryptg`) bundled: packaged sync and
   decryption run at native speed.
-- Backend tests: 274 passing; the full test gates (ruff, pytest,
-  vitest, production build, packaged smoke) run green before this
-  release.
+- Backend tests: 290 passing; the full test gates (ruff, pytest,
+  vitest, production build, packaged smoke, desktop UI smoke) run
+  green before this release.
+- Build fix: a misplaced `@import` block in `app.css` (at the bottom of
+  the file, after 458 rules) caused postcss to silently drop *all* view
+  stylesheets from production bundles; the setup wizard overlay lost
+  `position: fixed` and rendered off-screen, appearing to do nothing.
+  Moved the block to the top of the file with a warning comment.
 
 ## Upgrade notes
 

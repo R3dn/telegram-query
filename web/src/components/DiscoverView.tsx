@@ -140,11 +140,7 @@ export function DiscoverView() {
     <div className="feed-col">
       <div className="bm-bar">
         <span className="nav-ic"><Ic.TrendingUp size={18} /></span>
-        <h2 className="bm-title">{t("nav.discover")}</h2>
-        <span className="dim" style={{ fontSize: 12 }}>
-          {t("discover.subtitle")}
-        </span>
-        <span style={{ flex: 1 }} />
+        <h2 className="bm-title" title={t("discover.subtitle")}>{t("nav.discover")}</h2>
         <div className="seg">
           {(["7d", "30d"] as const).map((d) => (
             <button key={d} className={days === d ? "on" : ""}
@@ -153,12 +149,13 @@ export function DiscoverView() {
             </button>
           ))}
         </div>
-        <button className="btn ghost sm" disabled={rebuilding}
+        <span style={{ flex: 1 }} />
+        <button className="btn ghost sm icon" disabled={rebuilding}
                 title={t("discover.rebuild.title")}
                 onClick={rebuild}>
           {rebuilding
-            ? <Ic.Spin size={13} className="spin" />
-            : <><Ic.RefreshCw size={13} /> {t("discover.rebuild.button")}</>}
+            ? <Ic.Spin size={14} className="spin" />
+            : <Ic.RefreshCw size={14} />}
         </button>
       </div>
 
@@ -216,12 +213,12 @@ export function DiscoverView() {
               </div>
             )}
             <div className="trend-actions">
-              <button className="btn ghost sm" onClick={() => runSearch(topic.term)}>{t("action.view")}</button>
-              <button className="btn ghost sm" disabled={timelineBusy}
+              <button className="btn ghost sm icon" disabled={timelineBusy}
+                      title={t("discover.timeline.button")}
                       onClick={() => showTimeline(topic.term)}>
                 {timelineBusy
-                  ? <Ic.Spin size={13} className="spin" />
-                  : <><Ic.Sparkles size={13} /> {t("discover.timeline.button")}</>}
+                  ? <Ic.Spin size={14} className="spin" />
+                  : <Ic.Sparkles size={14} />}
               </button>
             </div>
           </div>

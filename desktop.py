@@ -4,7 +4,8 @@ Source runs keep ``python app.py`` untouched. This module is what
 ``TelegramQuery.exe`` runs instead: a windowed, no-console application
 lifecycle that
 
-1. takes a single-instance lock (a second launch focuses the running one),
+1. takes a single-instance lock (a second launch focuses the running
+   window),
 2. migrates any legacy archive found beside the exe into the user data
    dir (see :mod:`migration`),
 3. writes logs to ``<data>/logs/app.log`` (rotating),
@@ -12,14 +13,14 @@ lifecycle that
    loopback HOST in the .env is overridden with a loud warning,
 5. picks a free port when the preferred one is busy,
 6. waits for ``/api/health/ready`` (never a blind sleep), then opens the
-   application URL in the default browser,
-7. keeps running until the user quits explicitly (``POST /api/app/quit``
-   from the UI sets the quit event),
-8. shuts down gracefully - Uvicorn stop, FastAPI lifespan cancellation
-   of running jobs, scheduler stop - and never leaves orphan processes.
-
-Everything degrades honestly: startup failures show a native error dialog
-pointing at the log file, and the process exits with a nonzero code.
+   application UI in its own native window (pywebview + Edge WebView2).
+   If the runtime is missing or the window cannot start the process
+   exits with an honest error dialog instead of a broken window,
+7. keeps running until the user closes the window or quits explicitly
+   (``POST /api/app/quit`` from the UI sets the quit event),
+8. shuts down gracefully - window close, Uvicorn stop, FastAPI lifespan
+   cancellation of running jobs, scheduler stop - and never leaves
+   orphan processes.
 """
 from __future__ import annotations
 
@@ -36,7 +37,6 @@ import threading
 import time
 import urllib.error
 import urllib.request
-import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,6 +55,8 @@ QUIT = threading.Event()
 _RUNNING = threading.Event()          # this process owns a desktop run
 _MUTEX: int | None = None             # single-instance mutex handle
 
+_TRAY = None                          # system tray icon handle
+
 APP_URL = ""                          # e.g. http://127.0.0.1:8412/
 LOG_FILE = ""
 
@@ -62,8 +64,33 @@ _LOOPBACK = ("127.0.0.1", "localhost", "::1")
 _ERROR_ALREADY_EXISTS = 183
 _MB_ICONERROR = 0x00000010
 _MB_ICONINFORMATION = 0x00000040
+_SW_RESTORE = 9                      # Win32 ShowWindow: un-minimize
 
 RUNTIME_FILE = "runtime.json"         # inside the data dir
+
+# ---------------------------------------------------------------------------
+# UI delivery: native window only (no browser fallback)
+# ---------------------------------------------------------------------------
+
+UI_WINDOW = "window"                  # native app window (pywebview)
+UI_NONE = "none"                      # headless (tests, CI)
+
+WINDOW_TITLE = "Telegram Query"       # matches the frontend <title>; a
+                                      # second launch finds the window by it
+WINDOW_SIZE = (1400, 900)
+WINDOW_MIN_SIZE = (960, 600)
+WINDOW_BACKGROUND = "#0b0e13"         # the UI's dark canvas (--bg): no
+                                      # white flash before React mounts
+# Microsoft EdgeUpdate channel GUIDs for the WebView2 runtime family -
+# the Evergreen runtime plus the beta/dev/canary channels pywebview also
+# accepts (its edgechromium backend needs build >= 86.0.622.0).
+_WEBVIEW2_CHANNELS = (
+    "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",   # Evergreen runtime
+    "{2CD8A007-E189-409D-A2C8-9AF4EF3C72AA}",   # beta
+    "{0D50BFEC-CD6A-4F9A-964C-C7416E3ACB10}",   # developer
+    "{65C35B14-6C1D-4122-AC46-7148CC9D6497}",   # canary
+)
+_WEBVIEW2_MIN = (86, 0)               # pywebview's floor for the window
 
 
 def is_desktop() -> bool:
@@ -80,6 +107,53 @@ def request_quit() -> bool:
         return False
     QUIT.set()
     return True
+
+
+def ui_mode(argv: list[str] | None = None) -> str:
+    """How this run presents its UI: :data:`UI_WINDOW` (native app
+    window) or :data:`UI_NONE` (headless - tests and CI).
+    ``--no-window``/``TGQ_NO_WINDOW`` forces headless mode; legacy
+    ``--no-browser``/``TGQ_NO_BROWSER`` are still honoured as aliases."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if ("--no-window" in argv or "--no-browser" in argv
+            or os.environ.get("TGQ_NO_WINDOW")
+            or os.environ.get("TGQ_NO_BROWSER")):
+        return UI_NONE
+    return UI_WINDOW
+
+
+def webview2_runtime_version() -> tuple[bool, str]:
+    """``(installed, detail)`` for the Edge WebView2 runtime the native
+    window needs. Mirrors pywebview's own detection (any EdgeUpdate
+    channel with build >= 86); a missing runtime must NOT reach pywebview,
+    which would silently pick the legacy MSHTML renderer that cannot run
+    the React UI."""
+    if sys.platform != "win32":
+        return True, "non-Windows: native OS webview"
+    try:
+        import winreg
+    except ImportError:              # pragma: no cover - win32 always has it
+        return False, "winreg unavailable"
+    for channel in _WEBVIEW2_CHANNELS:
+        for hive_name in ("HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE"):
+            for subkey in (
+                    rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{channel}",
+                    rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{channel}"):
+                try:
+                    with winreg.OpenKey(getattr(winreg, hive_name),
+                                        subkey) as key:
+                        pv = winreg.QueryValueEx(key, "pv")[0].strip()
+                except OSError:
+                    continue
+                if not pv or pv == "0.0.0.0":
+                    continue
+                try:
+                    parts = tuple(int(p) for p in pv.split(".")[:2])
+                except ValueError:
+                    continue
+                if parts >= _WEBVIEW2_MIN:
+                    return True, f"WebView2 {pv}"
+    return False, "no WebView2 runtime channel found (EdgeUpdate)"
 
 
 # ---------------------------------------------------------------------------
@@ -177,10 +251,10 @@ def runtime_path() -> Path:
     return config.DATA_DIR / RUNTIME_FILE
 
 
-def write_runtime_file(port: int) -> None:
+def write_runtime_file(port: int, ui: str) -> None:
     runtime_path().parent.mkdir(parents=True, exist_ok=True)
     runtime_path().write_text(json.dumps({
-        "port": port, "pid": os.getpid(),
+        "port": port, "pid": os.getpid(), "ui": ui,
         "started": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "version": config.__version__,
     }, indent=2), encoding="utf-8")
@@ -194,8 +268,19 @@ def read_runtime_port() -> int | None:
         return None
 
 
+def read_runtime_ui() -> str:
+    """UI mode the running instance recorded. Runtime files written by
+    pre-v1.1 builds have no ``ui`` field - default to the native window."""
+    try:
+        data = json.loads(runtime_path().read_text(encoding="utf-8"))
+        ui = data.get("ui")
+        return ui if ui in (UI_WINDOW, UI_NONE) else UI_WINDOW
+    except (OSError, ValueError):
+        return UI_WINDOW
+
+
 # ---------------------------------------------------------------------------
-# Health, browser, dialogs
+# Health, window, browser, dialogs
 # ---------------------------------------------------------------------------
 
 def _get(url: str, timeout: float = 2.0) -> tuple[bool, int, str]:
@@ -224,15 +309,329 @@ def wait_healthy(port: int, timeout_s: float) -> tuple[bool, str]:
     return False, last_err
 
 
-def open_app(url: str) -> bool:
+def run_app_window(url: str,
+                   server_thread: threading.Thread) -> tuple[bool, bool]:
+    """Serve the UI inside a native window (pywebview + Edge WebView2).
+
+    Blocks the main thread - a WinForms GUI loop requires it - until the
+    window closes. Closing the window asks for the same graceful
+    shutdown the in-app Exit action triggers. Returns
+    ``(ran, server_died)``: ``ran=False`` means the window backend failed
+    before or while starting (missing library, broken .NET, unwritable
+    storage).
+    """
     try:
-        opened = webbrowser.open(url)
-    except Exception:  # noqa: BLE001 - exotic default-browser setups
-        opened = False
-    if not opened:
-        log.warning("could not open the default browser - open %s manually",
-                    url)
-    return opened
+        import webview
+    except Exception:                       # noqa: BLE001
+        log.exception("pywebview is not importable - no native window")
+        return False, False
+
+    server_died = threading.Event()
+
+    # text_select=True: the default would inject a global user-select
+    # none - unacceptable for an archive users copy from. The app's own
+    # CSS governs selection instead.
+    window = webview.create_window(
+        WINDOW_TITLE, url,
+        width=WINDOW_SIZE[0], height=WINDOW_SIZE[1],
+        min_size=WINDOW_MIN_SIZE,
+        background_color=WINDOW_BACKGROUND,
+        text_select=True)
+    window.events.closed += lambda: QUIT.set()
+
+    # minimised -> hide from taskbar and rely on the tray icon
+    def _on_minimized() -> None:           # noqa: E306
+        try:
+            window.hide()
+        except Exception:
+            pass
+    try:
+        window.events.minimized += _on_minimized
+    except AttributeError:
+        pass                             # older pywebview - minimise stays
+                                         # on the taskbar, tray still works
+
+    _start_tray(window)
+
+    # The WinForms form inherits python.exe's icon; swap in the app mark
+    # for both taskbar and title bar once the handle exists.
+    threading.Thread(target=_set_taskbar_icon, name="tgq-taskbar-icon",
+                     daemon=True).start()
+
+    def _watchdog() -> None:
+        while not QUIT.wait(0.5):
+            if not server_thread.is_alive():
+                log.error("server thread exited unexpectedly")
+                server_died.set()
+                QUIT.set()
+        _stop_tray()
+        try:
+            window.destroy()     # no-op when the window is already closed
+        except Exception:         # noqa: BLE001 - best effort close
+            log.exception("closing the window after quit failed")
+
+    threading.Thread(target=_watchdog, name="tgq-window-watch",
+                     daemon=True).start()
+    try:
+        webview.start(private_mode=False,
+                      storage_path=str(config.DATA_DIR / "webview"))
+    except Exception:                       # noqa: BLE001
+        log.exception("native window failed to start")
+        _stop_tray()
+        return False, False
+    _stop_tray()
+    return True, server_died.is_set()
+
+
+# ---------------------------------------------------------------------------
+# System tray (minimize-to-tray)
+# ---------------------------------------------------------------------------
+
+def _icon_path() -> Path:
+    """Resolved path to the app icon (.ico), or nonexistent if missing."""
+    repo = Path(__file__).resolve().parent
+    if hasattr(sys, '_MEIPASS'):
+        return Path(sys._MEIPASS) / "packaging" / "windows" / "assets" / "app.ico"
+    return repo / "packaging" / "windows" / "assets" / "app.ico"
+
+
+def _tray_icon_image():
+    """Load the app icon as a PIL Image for the system tray."""
+    from PIL import Image
+    ico_path = _icon_path()
+    if not ico_path.exists():
+        log.warning("icon file not found at %s - using placeholder",
+                    ico_path)
+        return Image.new("RGBA", (64, 64), (91, 141, 239, 255))
+    # ICO is multi-frame; use the largest frame for the tray
+    img = Image.open(ico_path)
+    frames = []
+    try:
+        while True:
+            frames.append(img.copy())
+            img.seek(img.tell() + 1)
+    except EOFError:
+        pass
+    if frames:
+        return max(frames, key=lambda f: f.size[0] * f.size[1])
+    return img
+
+
+def _ensure_start_menu_shortcut(app_user_model_id: str,
+                                icon_path: str) -> None:
+    """Write/update a Start-Menu shortcut for Telegram Query.
+
+    Windows uses this shortcut's icon when it groups the running window
+    under the same AppUserModelID."""
+    try:
+        import win32com.client
+    except Exception:
+        return                         # pywin32 not installed — silent skip
+
+    import os
+    from pathlib import Path
+
+    start_menu = Path(
+        os.environ.get(
+            "APPDATA",
+            os.environ.get("USERPROFILE",
+                           str(Path.home()))) + r"\Microsoft\Windows\Start Menu\Programs")
+    shortcut_path = start_menu / "Telegram Query.lnk"
+    start_menu.mkdir(parents=True, exist_ok=True)
+
+    # Only create if missing or if target has changed
+    needs_update = True
+    if shortcut_path.exists():
+        try:
+            shell = win32com.client.Dispatch("WScript.Shell")
+            sc = shell.CreateShortCut(str(shortcut_path))
+            current_target = sc.Targetpath
+            current_icon = sc.IconLocation
+            if (current_target and
+                sys.executable.upper() in current_target.upper() and
+                current_icon and icon_path in current_icon and
+                app_user_model_id in (sc.WindowStyle or "")):  # type: ignore[attr-defined]
+                needs_update = False
+        except Exception:
+            pass
+
+    if needs_update:
+        shell = win32com.client.Dispatch("WScript.Shell")
+        sc = shell.CreateShortCut(str(shortcut_path))
+        sc.Targetpath = sys.executable
+        sc.Arguments = str(Path(__file__).resolve())
+        sc.WorkingDirectory = str(Path(__file__).resolve().parent)
+        sc.IconLocation = icon_path + ",0"
+        sc.Description = "Telegram Query"
+        sc.WindowStyle = 1                     # normal window
+        # System.AppUserModelID property bag is not exposed via WSH, so
+        # we write the shortcut first then patch it via IShellLink.
+        sc.Save()
+
+        # Patch the AppUserModelID into the shortcut via IShellLink
+        try:
+            from win32com.propsys import propsys
+            from win32com.propsys.pscon import PKEY_AppUserModel_ID
+
+            # GPS_READWRITE may not be exposed; use its numeric value 2
+            props = propsys.SHGetPropertyStoreFromParsingName(
+                str(shortcut_path), None, 2, propsys.IID_IPropertyStore)
+            props.SetValue(
+                PKEY_AppUserModel_ID,
+                propsys.PROPVARIANTType(app_user_model_id))
+            props.Commit()
+        except Exception:
+            log.warning("could not set AppUserModelID on shortcut")
+
+
+def _set_taskbar_icon() -> None:
+    """Replace the taskbar icon with our own mark so a source run of
+    desktop.py doesn't show the generic Python exe icon.
+
+    Windows 10/11 taskbar groups windows by the executable's icon.  The
+    only reliable override for a source run is:
+
+    1. Create a Start-Menu shortcut that points at python.exe and
+       carries our icon + an AppUserModelID.
+    2. Call `SetCurrentProcessExplicitAppUserModelID` with the same ID
+       so Windows pairs the running window with the shortcut.
+    """
+    if sys.platform != "win32":
+        return
+
+    ico_path = _icon_path()
+    if not ico_path.exists():
+        log.warning("icon file missing, taskbar icon unchanged")
+        return
+
+    app_user_model_id = "Redn.TelegramQuery.Desktop"
+
+    try:
+        _ensure_start_menu_shortcut(
+            app_user_model_id, str(ico_path.resolve()))
+    except Exception:
+        log.exception("creating taskbar shortcut failed")
+
+    # Force Windows to refresh the icon cache / taskbar association.
+    try:
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        shell32.SHChangeNotify(0x08000000, 0, None, None)  # SHCNE_ASSOCCHANGED
+    except Exception:
+        pass
+
+    try:
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        shell32.SetCurrentProcessExplicitAppUserModelID(
+            ctypes.c_wchar_p(app_user_model_id))
+    except Exception:
+        log.exception("SetCurrentProcessExplicitAppUserModelID failed")
+
+    # Classic per-window icon (title bar + Alt-Tab).
+    try:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+
+        hicon_large = ctypes.c_void_p()
+        hicon_small = ctypes.c_void_p()
+        shell32.ExtractIconExW.argtypes = [
+            ctypes.c_wchar_p, ctypes.c_int,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
+        shell32.ExtractIconExW.restype = ctypes.c_uint
+        n = shell32.ExtractIconExW(
+            str(ico_path), 0,
+            ctypes.byref(hicon_large), ctypes.byref(hicon_small), 1)
+        if n == 0 or not hicon_large.value:
+            log.warning("ExtractIconExW could not load %s", ico_path)
+            return
+
+        hwnd = None
+        for _ in range(60):
+            hwnd = user32.FindWindowW(None, WINDOW_TITLE)
+            if hwnd:
+                break
+            time.sleep(0.5)
+        if not hwnd:
+            return
+
+        WM_SETICON = 0x0080
+        ICON_BIG = 1
+        ICON_SMALL = 0
+        user32.SendMessageW.argtypes = [
+            ctypes.c_void_p, ctypes.c_uint,
+            ctypes.c_size_t, ctypes.c_void_p]
+        user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG,
+                            hicon_large.value)
+        if hicon_small.value:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL,
+                                hicon_small.value)
+
+        # Set class icon (affects taskbar grouping).
+        GCLP_HICON = -14
+        user32.SetClassLongPtrW.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+        user32.SetClassLongPtrW.restype = ctypes.c_void_p
+        user32.SetClassLongPtrW(hwnd, GCLP_HICON, hicon_large.value)
+
+        # Force frame refresh.
+        SWP_FRAMECHANGED = 0x0020
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_NOZORDER = 0x0004
+        SWP_NOACTIVATE = 0x0010
+        user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE |
+                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+
+        log.info("taskbar icon set from %s", ico_path)
+    except Exception:
+        log.exception("taskbar icon setup failed")
+
+
+def _start_tray(window) -> None:
+    """Start the system tray icon in a background thread."""
+    global _TRAY
+    try:
+        import pystray
+    except Exception:                       # noqa: BLE001
+        log.exception("pystray not importable - system tray unavailable")
+        return
+
+    icon_img = _tray_icon_image()
+
+    def _on_open(_icon, _item):            # noqa: E306
+        try:
+            window.show()
+        except Exception:
+            pass
+
+    def _on_exit(_icon, item):              # noqa: E306
+        QUIT.set()
+        if _icon is not None:
+            _icon.stop()
+
+    menu = pystray.Menu(
+        pystray.MenuItem("Telegram Query", lambda _i, _it: None,
+                         enabled=False),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Open", _on_open, default=True),
+        pystray.MenuItem("Exit", _on_exit),
+    )
+    _TRAY = pystray.Icon("TelegramQuery", icon_img,
+                         "Telegram Query", menu=menu)
+    threading.Thread(target=_TRAY.run, name="tgq-tray",
+                     daemon=True).start()
+
+
+def _stop_tray() -> None:
+    """Cleanly stop the system tray icon when the app exits."""
+    global _TRAY
+    if _TRAY is not None:
+        try:
+            _TRAY.stop()
+        except Exception:                   # noqa: BLE001
+            pass
+        _TRAY = None
 
 
 def show_error(title: str, message: str) -> None:
@@ -287,20 +686,26 @@ def _startup_timeout() -> float:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _report_server_death() -> None:
+    show_error(
+        "The application stopped unexpectedly",
+        "The local backend exited. Please start Telegram Query "
+        f"again.\n\nDetails are in the log:\n{LOG_FILE}")
+
+
 def main(argv: list[str] | None = None) -> int:
     global APP_URL
     ensure_streams()
     configure_logging()
     install_excepthooks()
     argv = list(sys.argv[1:] if argv is None else argv)
-    no_browser = ("--no-browser" in argv
-                  or bool(os.environ.get("TGQ_NO_BROWSER")))
-    log.info("Telegram Query %s (desktop mode, pid %s, data dir %s)",
-             config.__version__, os.getpid(), config.DATA_DIR)
+    mode = ui_mode(argv)
+    log.info("Telegram Query %s (desktop mode, ui=%s, pid %s, data dir %s)",
+             config.__version__, mode, os.getpid(), config.DATA_DIR)
 
     if not acquire_single_instance():
         log.info("another instance is running - focusing it")
-        focus_existing(no_browser=no_browser)
+        focus_existing(quiet=(mode == UI_NONE))
         return 0
 
     # Legacy archive migration must happen before the DB is opened.
@@ -338,7 +743,7 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("port %s is busy - using %s instead",
                     config.settings.port, port)
     APP_URL = f"http://{host}:{port}/"
-    write_runtime_file(port)
+    write_runtime_file(port, mode)
 
     import uvicorn
     server = uvicorn.Server(uvicorn.Config(
@@ -365,20 +770,46 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     log.info("ready - application running at %s", APP_URL)
-    if not no_browser:
-        open_app(APP_URL)
 
-    # Run until the user explicitly exits (UI Exit action) or the server
-    # thread dies unexpectedly.
-    while not QUIT.is_set():
-        if not server_thread.is_alive():
-            log.error("server thread exited unexpectedly")
+    if mode == UI_NONE:
+        # Headless runs (tests, CI): supervise inline until the user
+        # exits (UI Exit action) or the server thread dies unexpectedly.
+        while not QUIT.is_set():
+            if not server_thread.is_alive():
+                log.error("server thread exited unexpectedly")
+                _report_server_death()
+                return 1
+            QUIT.wait(0.5)
+    else:
+        # Native window: mandatory WebView2 runtime.
+        available, detail = webview2_runtime_version()
+        if not available:
+            log.error("native window unavailable (%s) - cannot start", detail)
+            QUIT.set()
+            server.should_exit = True
+            server_thread.join(timeout=10)
             show_error(
-                "The application stopped unexpectedly",
-                "The local backend exited. Please start Telegram Query "
-                f"again.\n\nDetails are in the log:\n{LOG_FILE}")
+                "Missing WebView2 Runtime",
+                "The app window needs the Microsoft Edge WebView2 Runtime, "
+                "which is not installed on this computer.\n\n"
+                "Install the free runtime from\n\nhttps://aka.ms/webview2\n\n"
+                "Details are in the log:\n" + LOG_FILE)
             return 1
-        QUIT.wait(0.5)
+
+        ran, server_died = run_app_window(APP_URL, server_thread)
+        if not ran:
+            log.error("native window failed to start - see the log above")
+            QUIT.set()
+            server.should_exit = True
+            server_thread.join(timeout=10)
+            show_error(
+                "Window startup failed",
+                "The application window could not open.\n\n"
+                f"Details are in the log:\n{LOG_FILE}")
+            return 1
+        if server_died:
+            _report_server_death()
+            return 1
 
     log.info("quit requested - shutting down gracefully")
     server.should_exit = True           # uvicorn runs the FastAPI lifespan:
@@ -392,18 +823,46 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def focus_existing(no_browser: bool = False) -> bool:
+def _focus_existing_window(timeout_s: float = 10.0) -> bool:
+    """Bring the running instance's native window to the front.
+
+    Called from a second launch, which is the foreground process at
+    that moment - exactly the case Windows allows to hand focus to
+    another window. Returns False when no window appears within the
+    deadline (still starting, or the first instance has none)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+    except OSError:                       # pragma: no cover - OS failure
+        return False
+    user32.FindWindowW.restype = ctypes.c_void_p
+    user32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+    user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        hwnd = user32.FindWindowW(None, WINDOW_TITLE)
+        if hwnd:
+            user32.ShowWindow(hwnd, _SW_RESTORE)
+            user32.SetForegroundWindow(hwnd)   # best effort; restore
+            return True                          # above already un-hides it
+        time.sleep(0.5)
+    return False
+
+
+def focus_existing(quiet: bool = False) -> bool:
     """Second launch: wait briefly for the running instance to answer,
-    then open the app URL next to it. A stale runtime file (crashed
-    first instance) degrades to an honest error dialog."""
+    then surface its window. A stale runtime file (crashed first instance)
+    degrades to an honest error dialog."""
     for _ in range(30):                  # ~15s: big archives migrate slowly
         port = read_runtime_port()
         if port:
             ok, _status, _err = _get(
                 f"http://127.0.0.1:{port}/api/health/ready")
             if ok:
-                if not no_browser:
-                    open_app(f"http://127.0.0.1:{port}/")
+                if not quiet:
+                    _surface_running_instance(port)
                 return True
         time.sleep(0.5)
     show_error(
@@ -412,6 +871,18 @@ def focus_existing(no_browser: bool = False) -> bool:
         "If you just closed it, wait a few seconds and launch again.\n\n"
         f"Diagnostic log:\n{LOG_FILE}")
     return False
+
+
+def _surface_running_instance(port: int) -> None:
+    """Focus the running instance's window. If it has no window yet
+    (still coming up) the second launch simply does nothing - the first
+    instance will appear when ready."""
+    if read_runtime_ui() == UI_WINDOW:
+        if _focus_existing_window():
+            return
+    # Quietly succeed: the instance is alive, the window will appear
+    # when it finishes starting.
+    return
 
 
 if __name__ == "__main__":

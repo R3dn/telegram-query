@@ -226,3 +226,30 @@ procedure instead of an aspiration; future features inherit the
 measure-first doctrine (see
 [docs/engineering/FEATURE_DEVELOPMENT_GUIDE.md](../engineering/FEATURE_DEVELOPMENT_GUIDE.md)
 §8).
+
+## 0010 — Desktop-only releases (2026-11-12)
+
+**Decision.** Telegram Query ships only as the Windows desktop app
+(Setup EXE / MSI). The built-in loopback web server is an
+implementation detail of the desktop runtime — never a deployment
+target and never exposed beyond the machine it serves. The source run
+(`python app.py`) and `--no-window`/`TGQ_NO_WINDOW` remain for
+development and the test harness.
+
+**Context.** The product is local-first and single-user: a private
+Telegram archive with the session file living beside it. A
+server/web release flavor would invite exposed archives (the server
+serves the complete archive with no per-user authentication), double
+the QA surface, and contradict the 1.0.0 desktop work that already
+removed the browser fallback in favor of the native window + tray.
+The existing hardening (loopback bind enforced with a warning, Host
+allowlist, `X-Frame-Options`) exists precisely because the server is
+meant to be embedded, not deployed.
+
+**Consequences.** Packaging, docs, and QA target the Windows desktop
+app only; server hardening stays as defense in depth for the embedded
+listener. No web-deployment docs, container images, or reverse-proxy
+guidance are added. Non-Windows source runs keep working but are not
+release artifacts. `pywin32` became a declared dependency on Windows
+so the taskbar-icon/AUMID path never silently degrades in a release;
+the Linux CI install is unaffected via the `sys_platform` marker.

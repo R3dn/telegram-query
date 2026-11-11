@@ -66,6 +66,7 @@ export const dict: Dict = {
   // اللوحة اليمنى
   "panel.askAi": "اسأل الذكاء",
   "panel.details": "التفاصيل",
+  "panel.detailsHint": "اختر رسالة لعرض التفاصيل",
   "panel.dragResize": "اسحب لتغيير الحجم",
   "panel.show": "إظهار اللوحة",
   "panel.hide": "إخفاء اللوحة",

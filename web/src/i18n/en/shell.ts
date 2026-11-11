@@ -66,6 +66,7 @@ export const dict: Dict = {
   // right panel
   "panel.askAi": "Ask AI",
   "panel.details": "Details",
+  "panel.detailsHint": "Select a message to see details",
   "panel.dragResize": "Drag to resize",
   "panel.show": "Show panel",
   "panel.hide": "Hide panel",

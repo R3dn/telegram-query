@@ -41,6 +41,7 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
       : "done",
   );
   const [busy, setBusy] = useState(false);
+  const [forceCredsEdit, setForceCredsEdit] = useState(false);
 
   const next = async () => {
     await refreshAppState();
@@ -69,16 +70,24 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="wizard-steps">
-          {STEPS.map((s, i) => (
-            <span key={s.key} className={`wstep ${i === idx ? "on" : i < idx ? "done" : ""}`}>
-              <b>{i < idx ? <Ic.Check size={11} /> : i + 1}</b> {t(s.label)}
-            </span>
-          ))}
+          {STEPS.map((s, i) => {
+            const cls = `wstep ${i === idx ? "on" : i < idx ? "done" : ""}`;
+            const canClick = i <= idx; // completed or current step
+            const Tag = canClick ? "button" : "span";
+            return (
+              <Tag key={s.key} className={cls}
+                   disabled={!canClick}
+                   onClick={canClick ? () => setStep(s.key) : undefined}>
+                <b>{i < idx ? <Ic.Check size={11} /> : i + 1}</b> {t(s.label)}
+              </Tag>
+            );
+          })}
         </div>
 
         <div className="wizard-body">
           {step === "credentials" && (
-            <CredentialsStep busy={busy} setBusy={setBusy} onDone={next} t={t} />
+            <CredentialsStep busy={busy} setBusy={setBusy} onDone={next} t={t}
+                             startEditing={forceCredsEdit} />
           )}
           {step === "login" && (
             <LoginStep busy={busy} setBusy={setBusy} onDone={next} t={t} />
@@ -101,6 +110,12 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
               <button className="btn primary" onClick={onClose}>
                 {t("onboarding.startUsing", { app: t("app.name") })}
               </button>
+              <button
+                className="link"
+                onClick={() => { setForceCredsEdit(true); setStep("credentials"); }}
+              >
+                {t("onboarding.editCreds")}
+              </button>
             </div>
           )}
         </div>
@@ -111,11 +126,12 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
 
 /* ---------------- steps ---------------- */
 
-function CredentialsStep({ busy, setBusy, onDone, t }: {
+function CredentialsStep({ busy, setBusy, onDone, t, startEditing }: {
   busy: boolean; setBusy: (b: boolean) => void; onDone: () => void; t: TFn;
+  startEditing?: boolean;
 }) {
   const { refreshAppState, appState } = useStore();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(startEditing === true);
   const configured = appState?.telegram_configured === true;
 
   return (

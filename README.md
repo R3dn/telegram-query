@@ -35,6 +35,13 @@ Telegram session never leave it.
   detection, flood-limit handling, a job queue with stop/cancel controls,
   and a restart-proof automatic sync schedule (on by default, every 6h,
   configurable).
+- **A real desktop app** — the Windows build opens in its own native
+  window (Edge WebView2): single instance, a second launch focuses the
+  running window, closing it quits gracefully, and minimizing hides it
+  to the **system tray** (left-click the tray icon to restore, right-
+  click for Open/Exit). A missing WebView2 runtime shows a clear error
+  dialog with the download link instead of a broken window — there is
+  no browser mode.
 - **Fast bilingual search** — FTS5 trigram index with Arabic/English
   normalization: diacritics, alef/ya variants, taa marbuta, plus extended
   rules — Arabic-Indic digits (٢٥→25), chat elongation (هااااي→هاي),
@@ -87,16 +94,22 @@ Telegram session never leave it.
 
 ## Quick start
 
+The desktop app is the release — Telegram Query ships only as the
+Windows installer (decision 0010 in
+[docs/decisions/README.md](docs/decisions/README.md)). "From source"
+below is the development and contributor path.
+
 ### Windows (installer)
 
 Download **`TelegramQuery-Setup-x64.exe`** (or the plain
 **`TelegramQuery-x64.msi`** for silent installs) from the release page
-and run it. No Python, Node, or other dependencies — data lives in
-`%LOCALAPPDATA%\TelegramQuery`, survives upgrades and uninstalls, and
-the app binds to loopback only. See
+and run it. No Python, Node, or other dependencies — it opens in its
+own app window (Microsoft Edge WebView2 Runtime, preinstalled on
+Windows 10/11), data lives in `%LOCALAPPDATA%\TelegramQuery`, survives
+upgrades and uninstalls, and the app binds to loopback only. See
 [docs/installation.md](docs/installation.md) for details.
 
-### From source
+### From source (development)
 
 Requirements: **Python 3.10+**. Node is *not* required — the frontend
 build is included.
@@ -219,6 +232,21 @@ TG_DB_PATH=$PWD/data/e2e.db TG_SESSION_PATH=$PWD/data/e2e-session \
   AI_API_KEY=e2e AI_MODEL=e2e-mock PORT=8123 python app.py &
 python scripts/e2e_test.py --base http://127.0.0.1:8123 --db data/e2e.db
 ```
+
+**Interactive desktop smoke test** (the full window lifecycle through
+the real `desktop.py` runtime: setup wizard with typed credentials,
+click-navigation across every view, theme/language persistence across
+a window restart, second-launch focus, graceful quit, and a
+zero-console-errors gate):
+
+```bash
+pip install playwright && python -m playwright install chromium
+python scripts/e2e_smoke_desktop.py
+```
+
+The run is fully isolated — its own data dir and its own `.env`
+(via `TGQ_ENV_FILE`), so it can never touch your real archive or
+credentials.
 
 CI runs the same suite on every push.
 

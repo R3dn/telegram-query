@@ -2,11 +2,20 @@
 # Install with:  pip install -r requirements.txt
 #
 # Upper bounds are deliberate majors-only guards (v9): the installed
-# set is tested together (fastapi 0.141 / openai 3.x / telethon 1.45);
-# a new MAJOR must be a conscious upgrade, not a surprise.
+# set is tested together (fastapi 0.141 / openai 3.x / telethon 1.45 /
+# pywebview 6.x); a new MAJOR must be a conscious upgrade, not a surprise.
 
 telethon>=1.36,<2        # Telegram MTProto client
 fastapi>=0.115,<1        # web API
 uvicorn>=0.30,<1         # server
 openai>=1.50,<4          # any OpenAI-compatible chat endpoint
 python-dotenv>=1.0,<2    # .env loading
+pywebview>=6.0,<7        # native app window for packaged builds
+                         # (Edge WebView2 on Windows; pulls pythonnet)
+pystray>=0.19,<1           # system tray icon (minimize-to-tray)
+Pillow>=10,<11             # tray icon image handling (packaging also
+                         # needs PIL for the generated icon)
+pywin32>=308; sys_platform == "win32"
+                          # taskbar icon + AUMID Start Menu shortcut;
+                          # the marker keeps Linux CI installs working
+                          # (the runtime still skips gracefully without it)
