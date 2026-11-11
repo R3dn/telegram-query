@@ -34,3 +34,12 @@ logs/
 *.log
 .DS_Store
 Thumbs.db
+
+# packaging build outputs (release artifacts are produced per build,
+# never committed: PyInstaller onedir, WiX intermediates, MSI/EXE).
+# Anchored to the repo root - web/dist stays tracked on purpose.
+/build/
+/dist/
+
+# downloaded WiX toolset binaries (scripts/build_windows.py fetches them)
+packaging/windows/tools/

@@ -1,0 +1,67 @@
+/* System surfaces: job center, settings, manage groups. */
+.mm-row {
+  display: flex; gap: 10px; align-items: center;
+  padding: 10px 8px; border-radius: var(--r-m);
+}
+.mm-row + .mm-row { border-top: 1px solid var(--border-soft); }
+.mm-row.clickable { cursor: pointer; }
+.mm-row.clickable:hover { background: var(--surface-2); }
+.mm-row .badge { flex: none; }
+.mm-row .g-ic svg { flex: none; }
+.mm-note { font-size: var(--fs-small); margin: 6px 0; line-height: 1.6; }
+.mm-note.dim { color: var(--dim); }
+.mm-progress {
+  display: flex; gap: 12px; align-items: flex-start; padding: 12px;
+  background: var(--surface-2); border: 1px solid var(--border-soft);
+  border-radius: var(--r-m); margin: 10px 0;
+}
+.mm-progress > svg { flex: none; margin-top: 2px; }
+.mm-log {
+  margin: 6px 0 0; max-height: 110px; overflow: auto; font-size: var(--fs-caption);
+  color: var(--dim); font-family: var(--mono); background: var(--bg);
+  border-radius: var(--r-s); padding: 8px; white-space: pre-wrap;
+}
+.btn.armed { background: var(--err-soft); font-weight: 700; }
+.btn.ghost.armed { border-color: var(--err); color: var(--err); }
+.row-actions { display: flex; gap: 6px; flex: none; align-items: center; }
+
+/* job center */
+.job-rows { display: flex; flex-direction: column; gap: 4px; }
+.job-row {
+  display: flex; gap: 10px; align-items: center; padding: 8px 4px;
+  border-bottom: 1px solid var(--border-soft); font-size: var(--fs-small);
+}
+.job-row:last-child { border-bottom: none; }
+.job-row .badge { flex: none; }
+.job-desc { color: var(--dim); font-size: var(--fs-small); }
+.job-log {
+  margin: 8px 0 0; max-height: 260px; overflow: auto; font-size: var(--fs-caption);
+  color: var(--dim); font-family: var(--mono); background: var(--bg);
+  border: 1px solid var(--border-soft); border-radius: var(--r-m);
+  padding: 10px; white-space: pre-wrap;
+}
+
+/* settings */
+.settings-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; gap: 12px; }
+.settings-row > span:first-child { font-weight: 550; }
+.settings-row .seg { flex: none; }
+.settings-actions { display: flex; gap: 8px; margin-top: 10px; }
+.settings-edit {
+  border: 1px solid var(--border-soft); border-radius: var(--r-m);
+  padding: 4px 14px 14px; margin: 6px 0 10px; background: var(--surface-2);
+}
+
+/* erase-all-data confirm panel (Settings → Data) */
+.erase-warn { display: flex; align-items: flex-start; gap: 8px; }
+.erase-warn svg { flex: none; margin-top: 1px; color: var(--err); }
+.erase-list {
+  list-style: none; margin: 2px 0 12px; padding: 0;
+  display: grid; gap: 6px;
+}
+.erase-list li {
+  display: flex; align-items: center; gap: 8px;
+  font-size: var(--fs-small); color: var(--dim); min-width: 0;
+}
+.erase-list li svg { flex: none; color: var(--faint); }
+.erase-list li b { color: var(--text); font-weight: 600; }
+.erase-list li > span { min-width: 0; overflow-wrap: anywhere; }

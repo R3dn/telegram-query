@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">
+  <Bundle Name="Telegram Query"
+          Version="@@VERSION@@"
+          Manufacturer="Telegram Query"
+          UpgradeCode="@@BUNDLE_UPGRADE_GUID@@"
+          IconSourceFile="@@ICON@@">
+    <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense">
+      <bal:WixStandardBootstrapperApplication LicenseFile="@@LICENSE@@" />
+    </BootstrapperApplicationRef>
+    <Chain>
+      <!-- TGQBUNDLED hides the MSI's own ARP entry (the bundle already
+           shows one) so users see a single "Telegram Query" in Add/Remove
+           Programs. Direct MSI installs never set it -> visible. -->
+      <MsiPackage Id="MainPackage"
+                  SourceFile="@@MSI@@"
+                  Compressed="yes"
+                  Vital="yes">
+        <MsiProperty Name="TGQBUNDLED" Value="1" />
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>

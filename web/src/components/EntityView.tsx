@@ -5,12 +5,17 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
+import { useLang } from "../i18n";
 import type { EntitiesSettings, Entity, EntityDetail } from "../api/types";
 import { nfmt } from "../utils/format";
+import { Ic } from "../design/icons";
 import { EmptyState } from "./EmptyState";
+
+type TFunc = ReturnType<typeof useLang>["t"];
 
 export function EntityView() {
   const { appState, toast, select, setRightTab, selection } = useStore();
+  const { t } = useLang();
   const [rows, setRows] = useState<Entity[] | null>(null);
   const [settings, setSettings] = useState<EntitiesSettings | null>(null);
   const [q, setQ] = useState("");
@@ -48,7 +53,7 @@ export function EntityView() {
         select(full);
         setRightTab("details");
       } catch {
-        toast("Could not open the original message", "err");
+        toast(t("discover.toast.openOriginalFailed"), "err");
       }
     })();
   };
@@ -68,7 +73,7 @@ export function EntityView() {
     if (!open || targetId === open.id) return;
     try {
       const r = await api.entityMerge(open.id, targetId);
-      toast("Entities merged - mentions and aliases moved over", "good");
+      toast(t("entities.toast.merged"), "good");
       setOpen(r);
       await load();
     } catch (e) {
@@ -82,8 +87,8 @@ export function EntityView() {
       const r = await api.entitiesAuto(!settings.auto);
       setSettings({ ...settings, auto: r.auto });
       toast(r.auto
-        ? "AI discovery on - new entities are found incrementally after each sync (cached, opt-out any time)"
-        : "AI discovery off - matching continues with the current gazetteer", "info");
+        ? t("entities.toast.autoOn")
+        : t("entities.toast.autoOff"), "info");
     } catch (e) {
       toast((e as Error).message, "err");
     }
@@ -92,20 +97,24 @@ export function EntityView() {
   return (
     <div className="feed-col">
       <div className="bm-bar">
-        <h2 className="bm-title">Entities</h2>
+        <span className="nav-ic"><Ic.MapPin size={18} /></span>
+        <h2 className="bm-title">{t("nav.entities")}</h2>
         <span className="dim" style={{ fontSize: 12 }}>
-          brands, products, orgs, places - never individual people
+          {t("entities.subtitle")}
         </span>
         <span style={{ flex: 1 }} />
-        <input className="input" style={{ maxWidth: 180 }} placeholder="Search entities…"
+        <input className="input" style={{ maxWidth: 180 }} placeholder={t("entities.searchPlaceholder")}
                value={q} onChange={(e) => { setQ(e.target.value); void load(e.target.value); }} />
         <select className="input" style={{ maxWidth: 130 }} value={sort}
                 onChange={(e) => setSort(e.target.value as "recent" | "mentions")}>
-          <option value="recent">Recent activity</option>
-          <option value="mentions">Most mentioned</option>
+          <option value="recent">{t("entities.sort.recent")}</option>
+          <option value="mentions">{t("entities.sort.mentions")}</option>
         </select>
-        <button className="btn ghost sm" onClick={() => setAdding((a) => !a)}>
-          {adding ? "✕" : "+ Add"}
+        <button className="btn ghost sm" onClick={() => setAdding((a) => !a)}
+                title={adding ? t("action.close") : t("entities.add.submit")}>
+          {adding
+            ? <Ic.Close size={14} />
+            : <><Ic.Plus size={14} /> {t("entities.add.submit")}</>}
         </button>
       </div>
 
@@ -113,12 +122,12 @@ export function EntityView() {
         <div className="digest-groups">
           <label className="label" style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" checked={settings.auto} onChange={() => void toggleAuto()} />
-            AI discovery of new entities (opt-in; runs incrementally after each sync, cached by content)
+            {t("entities.autoLabel")}
           </label>
         </div>
       )}
 
-      {adding && <AddEntityForm onDone={() => { setAdding(false); void load(); }} />}
+      {adding && <AddEntityForm t={t} onDone={() => { setAdding(false); void load(); }} />}
 
       <div className="feed">
         {open ? (
@@ -127,10 +136,12 @@ export function EntityView() {
               <span className="badge">{open.kind}</span>
               <b className="bm-grp" dir="auto">{open.name}</b>
               <span className="dim" style={{ fontSize: 12 }}>
-                {nfmt(open.mentions_count)} mentions · {open.groups.length} group(s)
+                {t("entities.detail.stats", { n: nfmt(open.mentions_count), g: open.groups.length })}
               </span>
               <span style={{ flex: 1 }} />
-              <button className="btn ghost sm" onClick={() => setOpen(null)}>← All entities</button>
+              <button className="btn ghost sm" onClick={() => setOpen(null)}>
+                <Ic.ChevronLeft size={13} /> {t("entities.backToList")}
+              </button>
             </div>
             {open.aliases.length > 0 && (
               <div className="story-groups" style={{ margin: "0 0 8px" }}>
@@ -143,7 +154,7 @@ export function EntityView() {
               <div className="story-groups" style={{ margin: "0 0 8px" }}>
                 {open.groups.map((g) => (
                   <span key={g.chat_id} className="chip static" dir="auto"
-                        title={`${g.n} mention(s)`}>
+                        title={t("entities.detail.groupChip", { n: g.n })}>
                     {g.title} ({g.n})
                   </span>
                 ))}
@@ -151,16 +162,16 @@ export function EntityView() {
             )}
             <div className="q-acts" style={{ margin: "0 0 10px", flexWrap: "wrap" }}>
               <button className="btn ghost sm"
-                      onClick={() => void patch(open.id, { ignored: true }, "Entity hidden")}>
-                hide from discovery
+                      onClick={() => void patch(open.id, { ignored: true }, t("entities.toast.hidden"))}>
+                <Ic.Ban size={13} /> {t("entities.hideFromDiscovery")}
               </button>
               {rows && rows.filter((r) => r.id !== open.id).length > 0 && (
                 <select className="input" style={{ maxWidth: 220 }} value=""
-                        title="Fold this entity's mentions and aliases into another one"
+                        title={t("entities.mergeHint")}
                         onChange={(e) => {
                           if (e.target.value) void mergeInto(Number(e.target.value));
                         }}>
-                  <option value="">Merge this entity into…</option>
+                  <option value="">{t("entities.mergeInto")}</option>
                   {rows!.filter((r) => r.id !== open.id).map((r) => (
                     <option key={r.id} value={r.id}>{r.name}</option>
                   ))}
@@ -172,18 +183,18 @@ export function EntityView() {
                         void (async () => {
                           try {
                             await api.entityDelete(open.id);
-                            toast("Entity deleted (mentions were references only)", "info");
+                            toast(t("entities.toast.deleted"), "info");
                             setOpen(null);
                             await load();
                           } catch (e) { toast((e as Error).message, "err"); }
                         })();
                       }}>
-                delete
+                <Ic.Trash size={13} /> {t("action.delete")}
               </button>
             </div>
-            <div className="label">Mentions</div>
+            <div className="label">{t("entities.detail.mentions")}</div>
             {open.mentions.length === 0 && (
-              <div className="side-note">No mentions yet - they accumulate after each sync.</div>
+              <div className="side-note">{t("entities.detail.noMentions")}</div>
             )}
             {open.mentions.map((m) => (
               <button key={`${m.chat_id}-${m.msg_id}`} className="src-row"
@@ -194,29 +205,35 @@ export function EntityView() {
               </button>
             ))}
             {open.mentions_count > open.mentions.length && (
-              <div className="side-note">+{open.mentions_count - open.mentions.length} older mention(s)</div>
+              <div className="side-note">
+                {t("entities.detail.older", { n: open.mentions_count - open.mentions.length })}
+              </div>
             )}
           </div>
         ) : rows === null ? (
-          <div className="side-note">loading…</div>
+          <div className="side-note">{t("state.loading")}</div>
         ) : rows.length === 0 ? (
-          <EmptyState icon="📌" title="No entities yet"
+          <EmptyState icon="MapPin" title={t("entities.empty.title")}
             hint={appState?.messages
-              ? "Add brands/products manually, seed them from your extracted deals (Rebuild data in Discover), or turn on AI discovery to find them incrementally after each sync."
-              : "Sync your groups first."} />
+              ? t("entities.empty.hintSynced")
+              : t("entities.empty.hintNoSync")} />
         ) : rows.map((r) => (
           <div key={r.id} className="entity-row">
             <button className="entity-main" onClick={() => void openEntity(r.id)}>
               <span className="g-title" dir="auto">{r.name}</span>
               <span className="g-meta">
                 <span className="badge" style={{ marginInlineEnd: 6 }}>{r.kind}</span>
-                {nfmt(r.mentions)} mention{r.mentions === 1 ? "" : "s"}
-                {r.recent > 0 && ` · ${r.recent} this week`}
-                {r.last_seen && ` · last ${(r.last_seen ?? "").slice(0, 10)}`}
+                {r.mentions === 1
+                  ? t("entities.row.mention", { n: nfmt(r.mentions) })
+                  : t("entities.row.mentions", { n: nfmt(r.mentions) })}
+                {r.recent > 0 && <>{" · "}{t("entities.row.recent", { n: r.recent })}</>}
+                {r.last_seen && <>{" · "}{t("entities.row.lastSeen", { d: (r.last_seen ?? "").slice(0, 10) })}</>}
               </span>
             </button>
-            <button className="saved-act" title="Hide from discovery (keep history)"
-                    onClick={() => void patch(r.id, { ignored: true }, "Entity hidden")}>🚫</button>
+            <button className="saved-act" title={t("entities.hideHint")}
+                    onClick={() => void patch(r.id, { ignored: true }, t("entities.toast.hidden"))}>
+              <Ic.Ban size={14} />
+            </button>
           </div>
         ))}
       </div>
@@ -224,7 +241,7 @@ export function EntityView() {
   );
 }
 
-function AddEntityForm({ onDone }: { onDone: () => void }) {
+function AddEntityForm({ t, onDone }: { t: TFunc; onDone: () => void }) {
   const { toast } = useStore();
   const [name, setName] = useState("");
   const [kind, setKind] = useState("brand");
@@ -239,7 +256,7 @@ function AddEntityForm({ onDone }: { onDone: () => void }) {
         name: name.trim(), kind,
         aliases: aliases.split(",").map((a) => a.trim()).filter(Boolean),
       });
-      toast("Entity added", "good");
+      toast(t("entities.toast.added"), "good");
       onDone();
     } catch (e) {
       toast((e as Error).message, "err");
@@ -250,10 +267,10 @@ function AddEntityForm({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="digest-groups" style={{ flexDirection: "column", alignItems: "stretch" }}>
-      <div className="label">New entity</div>
+      <div className="label">{t("entities.add.title")}</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <input className="input" style={{ flex: 1, minWidth: 160 }} dir="auto"
-               placeholder="Name, e.g. GadgetHub" value={name}
+               placeholder={t("entities.add.namePlaceholder")} value={name}
                onChange={(e) => setName(e.target.value)} />
         <select className="input" style={{ maxWidth: 120 }} value={kind}
                 onChange={(e) => setKind(e.target.value)}>
@@ -262,11 +279,11 @@ function AddEntityForm({ onDone }: { onDone: () => void }) {
           ))}
         </select>
         <input className="input" style={{ flex: 1, minWidth: 160 }} dir="auto"
-               placeholder="Aliases (comma-separated)" value={aliases}
+               placeholder={t("entities.add.aliasesPlaceholder")} value={aliases}
                onChange={(e) => setAliases(e.target.value)} />
         <button className="btn primary sm" disabled={saving || !name.trim()}
                 onClick={() => void save()}>
-          {saving ? "…" : "Add"}
+          {saving ? <Ic.Spin size={13} className="spin" /> : t("entities.add.submit")}
         </button>
       </div>
     </div>

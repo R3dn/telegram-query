@@ -1,16 +1,19 @@
 /** Right panel "Ask AI" tab: conversational history, grounded answers with
- *  clickable citations, visible retrieval scope (v0.4 chips), answer export,
+ *  clickable citations, visible retrieval scope chips, answer export,
  *  provider disclosure, and setup/empty states. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
+import { useLang } from "../i18n";
 import { mdToHtml } from "../utils/markdown";
 import {
   clearChat, getAiScopeDays, getChat, pushChat, setAiScopeDays, type ChatTurn,
 } from "../utils/history";
 import { fmtDate } from "../utils/format";
 import { EmptyState } from "./EmptyState";
+import { Ic } from "../design/icons";
 
+// Bilingual by design: examples show Arabic and English questions.
 const EXAMPLES = [
   "What were the main topics this week?",
   "ما أهم العروض المنشورة مؤخراً؟",
@@ -20,6 +23,7 @@ const EXAMPLES = [
 
 export function AiPanel() {
   const { appState, selection, clearSelection, select, setRightTab, toast } = useStore();
+  const { t } = useLang();
   const [chat, setChat] = useState<ChatTurn[]>(getChat);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
@@ -79,7 +83,7 @@ export function AiPanel() {
         select(m);
         setRightTab("details");
       } catch {
-        toast("Could not open the original message", "err");
+        toast(t("ai.couldNotOpen"), "err");
       }
     })();
   };
@@ -88,24 +92,26 @@ export function AiPanel() {
     return (
       <div className="ai-panel">
         <EmptyState
-          icon="✦"
-          title="Ask AI is not configured"
-          hint="Add AI_API_KEY (and optionally AI_BASE_URL / AI_MODEL) in your .env file to enable grounded answers over your archive. Works with any OpenAI-compatible endpoint - OpenAI, Groq, OpenRouter, Ollama, vLLM and more. Restart the app after editing .env."
+          icon="Sparkles"
+          title={t("ai.notConfigured")}
+          hint={t("ai.notConfiguredHint")}
         />
       </div>
     );
   }
 
-  const scopeSummary = `${selection.size ? `${selection.size} group${selection.size > 1 ? "s" : ""}` : "all groups"}`
-    + (scopeDays === "all" ? "" : ` · last ${scopeDays === "7d" ? "7" : "30"} days`);
+  const scopeSummary = t("ai.scopeGroups", { n: selection.size })
+    + (scopeDays === "all" ? "" : ` · ${t("filter.days", { n: scopeDays === "7d" ? 7 : 30 })}`);
 
   return (
     <div className="ai-panel">
       {chat.length === 0 && !busy && (
         <EmptyState
-          icon="✦"
-          title="Ask anything about your groups"
-          hint={`Answers are grounded in your ${appState?.messages.toLocaleString() ?? ""} archived messages, with clickable citations. Questions in Arabic get Arabic answers.`}
+          icon="Sparkles"
+          title={t("ai.emptyTitle")}
+          hint={t("ai.emptyHint", {
+            n: (appState?.messages ?? 0).toLocaleString(),
+          })}
         />
       )}
 
@@ -116,7 +122,9 @@ export function AiPanel() {
                     providerModel={appState?.ai_model} />
         ))}
         {busy && (
-          <div className="ai-thinking"><span className="spinner" /> searching {scopeSummary} and thinking…</div>
+          <div className="ai-thinking">
+            <span className="spinner" /> {t("ai.thinking", { scope: scopeSummary })}
+          </div>
         )}
         <div ref={bottomRef} />
       </div>
@@ -131,23 +139,24 @@ export function AiPanel() {
         </div>
       )}
 
-      <div className="ai-scope-row" title="The AI only retrieves messages inside this scope">
-        <span className="label">Scope:</span>
+      <div className="ai-scope-row" title={t("ai.scopeHint")}>
+        <span className="label">{t("ai.scope")}</span>
         {selection.size > 0 ? (
           <button className="chip on" onClick={() => clearSelection()}
-                  title="Remove the group filter - search all tracked groups">
-            👥 {selection.size} group{selection.size > 1 ? "s" : ""} <span className="x">✕</span>
+                  title={t("ai.scopeGroupsHint")}>
+            <Ic.Users size={12} /> {t("ai.scopeGroups", { n: selection.size })}
+            <span className="x"><Ic.Close size={11} /></span>
           </button>
         ) : (
-          <span className="chip on static" title="Uses the group selection in the sidebar">
-            🌍 all groups
+          <span className="chip on static" title={t("ai.scopeAllHint")}>
+            <Ic.Globe size={12} /> {t("filter.allGroups")}
           </span>
         )}
         {(["all", "7d", "30d"] as const).map((c) => (
           <button key={c}
                   className={`chip ${scopeDays === c ? "on" : ""}`}
                   onClick={() => { setScopeDays(c); setAiScopeDays(c); }}>
-            {c === "all" ? "All time" : c === "7d" ? "7 days" : "30 days"}
+            {c === "all" ? t("filter.allTime") : t("filter.days", { n: c === "7d" ? 7 : 30 })}
           </button>
         ))}
       </div>
@@ -156,7 +165,7 @@ export function AiPanel() {
         <textarea
           className="input"
           rows={2}
-          placeholder="Ask a question…  (Ctrl+Enter)"
+          placeholder={t("ai.placeholder")}
           value={question}
           dir="auto"
           onChange={(e) => setQuestion(e.target.value)}
@@ -168,18 +177,21 @@ export function AiPanel() {
           }}
         />
         <button className="btn primary" disabled={busy || !question.trim()} onClick={() => void ask(question)}>
-          Ask
+          {t("ai.ask")}
         </button>
       </div>
       <div className="ai-disclosure">
         {appState && (
           <span>
-            Answers send retrieved message excerpts to <b>{appState.ai_provider_host}</b> ({appState.ai_model})
-            within: {scopeSummary}. Nothing is sent unless you ask.
+            {t("ai.disclosure", {
+              host: appState.ai_provider_host,
+              model: appState.ai_model,
+              scope: scopeSummary,
+            })}
           </span>
         )}
         {chat.length > 0 && (
-          <button className="link" onClick={() => { clearChat(); setChat([]); }}>clear history</button>
+          <button className="link" onClick={() => { clearChat(); setChat([]); }}>{t("ai.clearHistory")}</button>
         )}
       </div>
     </div>
@@ -193,6 +205,7 @@ function TurnView({ turn, onOpenSource, providerHost, providerModel }: {
   providerModel?: string;
 }) {
   const { select, setRightTab, toast } = useStore();
+  const { t } = useLang();
   const [exporting, setExporting] = useState(false);
 
   // citation clicks inside the answer open the cited message
@@ -203,7 +216,7 @@ function TurnView({ turn, onOpenSource, providerHost, providerModel }: {
     const src = turn.sources[n - 1];
     if (!src) {
       // model cited something outside the retrieved set - never fake it
-      toast(`Citation [${n}] has no matching retrieved message`, "err");
+      toast(t("ai.badCitation", { n }), "err");
       return;
     }
     void (async () => {
@@ -212,7 +225,7 @@ function TurnView({ turn, onOpenSource, providerHost, providerModel }: {
         select(m);
         setRightTab("details");
       } catch {
-        toast("Could not open the original message", "err");
+        toast(t("ai.couldNotOpen"), "err");
       }
     })();
   };
@@ -228,7 +241,7 @@ function TurnView({ turn, onOpenSource, providerHost, providerModel }: {
         provider_host: providerHost,
         model: providerModel,
       });
-      toast(`Exported: ${name}`, "good");
+      toast(t("ai.exported", { name }), "good");
     } catch (e) {
       toast((e as Error).message, "err");
     } finally {
@@ -245,16 +258,18 @@ function TurnView({ turn, onOpenSource, providerHost, providerModel }: {
                dangerouslySetInnerHTML={{ __html: mdToHtml(turn.answer) }} />
           <div className="ai-src-meta">
             {turn.fallback === "recent"
-              ? "No keyword hits — answer based on the most recent messages."
-              : `Based on ${turn.sources.length} retrieved message${turn.sources.length === 1 ? "" : "s"}.`}
+              ? t("ai.fallbackRecent")
+              : t("ai.basedOn", { n: turn.sources.length })}
             <button className="link" disabled={exporting}
                     onClick={() => void exportAnswer()} style={{ marginInlineStart: 8 }}>
-              {exporting ? "exporting…" : "export .md"}
+              {exporting
+                ? t("ai.exporting")
+                : t("ai.export")}
             </button>
           </div>
           {turn.sources.length > 0 && (
             <details className="ai-sources">
-              <summary>Sources ({turn.sources.length})</summary>
+              <summary>{t("ai.sources", { n: turn.sources.length })}</summary>
               {turn.sources.map((s, i) => (
                 <button key={i} className="src-row" onClick={() => onOpenSource(s)}>
                   <span className="num">[{i + 1}]</span>

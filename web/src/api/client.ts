@@ -395,4 +395,23 @@ export const api = {
     req<{ ok: boolean }>(`/api/discover/entities/${id}`, { method: "DELETE" }),
   messageContext: (chatId: number, msgId: number) =>
     req<ConversationContext>(`/api/message/${chatId}/${msgId}/context`),
+
+  // data management (v1.0): powers the Settings "Data" section.
+  // GET /api/data/status — where the archive lives, sizes, no secrets.
+  dataStatus: () =>
+    req<{
+      desktop_mode: boolean;
+      data_dir: string;
+      db_path: string;
+      db_size: number;
+      session_exists: boolean;
+      session_path: string;
+      log_file: string;
+      migrations: unknown[];
+    }>("/api/data/status"),
+  // POST /api/data/erase — irreversible full cleanup; api/data.py requires
+  // the exact case-sensitive token "ERASE" as confirmation.
+  dataErase: (confirm: string) =>
+    post<{ ok: boolean; deleted: string[]; quit: boolean }>(
+      "/api/data/erase", { confirm }),
 };

@@ -21,7 +21,8 @@ import {
   getTheme,
   type SearchHistoryItem,
 } from "../utils/history";
-import { jobLabel } from "../utils/format";
+import { jobKey } from "../utils/format";
+import { useLang } from "../i18n";
 
 export type FeedMode =
   | "discover"
@@ -52,7 +53,7 @@ const DEFAULT_FILTERS: Filters = {
   from: "", to: "", sender: "", media: "", sort: "desc", starred: false,
 };
 
-interface Store {
+export interface Store {
   // theme
   theme: "dark" | "light";
   toggleTheme: () => void;
@@ -122,6 +123,8 @@ export function useStore(): Store {
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
+  const { t } = useLang();
+
   // ---------- theme ----------
   const [theme, setThemeState] = useState<"dark" | "light">(getTheme);
   const toggleTheme = useCallback(() => {
@@ -281,7 +284,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       } catch (e) {
         if ((e as Error).name === "AbortError") return; // superseded load
-        toast(`Load failed: ${(e as Error).message}`, "err");
+        toast(t("feed.loadFailed", { msg: (e as Error).message }), "err");
       } finally {
         if (seq === loadSeq.current) setLoading(false);
       }
@@ -384,7 +387,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const first = lastDoneRef.current === undefined;
               lastDoneRef.current = done.finished_at;
               if (!first) {
-                toast(`${jobLabel(done.name)} ${done.ok ? "finished" : "failed"}`, done.ok ? "good" : "err");
+                toast(`${t(jobKey(done.name))} ${done.ok ? t("job.finished") : t("job.failed")}`, done.ok ? "good" : "err");
                 await Promise.all([refreshAppState(), refreshGroups()]);
                 void loadFeed(true);
               }

@@ -9,8 +9,10 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
+import { useLang } from "../i18n";
 import type { Decision, DecisionsSettings, DecisionsMonitor } from "../api/types";
 import { statusTone } from "../utils/format";
+import { Ic } from "../design/icons";
 import { EmptyState } from "./EmptyState";
 import { Modal } from "./Modal";
 
@@ -18,9 +20,12 @@ const STATUSES = ["proposed", "committed", "completed", "cancelled",
   "overdue", "unverified", "unknown"];
 const KINDS = ["decision", "commitment", "plan"];
 
+type T = ReturnType<typeof useLang>["t"];
+
 export function DecisionsView() {
   const { appState, toast, jobs, groups, evidenceFocus, setEvidenceFocus }
     = useStore();
+  const { t } = useLang();
   const [rows, setRows] = useState<Decision[] | null>(null);
   const [settings, setSettings] = useState<DecisionsSettings | null>(null);
   const [monitor, setMonitor] = useState<DecisionsMonitor | null>(null);
@@ -91,8 +96,8 @@ export function DecisionsView() {
     try {
       const s = await api.decisionsCheckFollowups();
       toast(s.new_followups > 0
-        ? `Found ${s.new_followups} new follow-up(s)`
-        : "No new follow-ups", s.new_followups > 0 ? "good" : "info");
+        ? t("decisions.followupsFound", { n: s.new_followups })
+        : t("decisions.noNewFollowups"), s.new_followups > 0 ? "good" : "info");
       await load();
       loadMonitor();
     } catch (e) {
@@ -105,7 +110,8 @@ export function DecisionsView() {
       const r = await api.decisionsExtract({
         chat_ids: chatIds, date_from: from || null, date_to: to || null,
       });
-      toast(r.started ? "Extraction queued - watch Jobs for progress" : "Extraction already queued", "info");
+      toast(r.started ? t("decisions.extractQueued") : t("decisions.extractAlreadyQueued"),
+            "info");
       setExtractOpen(false);
     } catch (e) {
       toast((e as Error).message, "err");
@@ -117,86 +123,97 @@ export function DecisionsView() {
   return (
     <div className="feed-col">
       <div className="bm-bar">
-        <h2 className="bm-title">Decisions</h2>
+        <h2 className="bm-title">{t("nav.decisions")}</h2>
         <input className="input" style={{ maxWidth: 220 }}
-               placeholder="Search decisions…" value={q} dir="auto"
+               placeholder={t("decisions.searchPlaceholder")} value={q} dir="auto"
                onChange={(e) => setQ(e.target.value)} />
         <select className="input" style={{ maxWidth: 130 }} value={status}
-                title="Status filter"
+                title={t("decisions.filterStatus")}
                 onChange={(e) => setStatus(e.target.value)}>
-          <option value="">Any status</option>
+          <option value="">{t("decisions.anyStatus")}</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <select className="input" style={{ maxWidth: 130 }} value={kind}
-                title="Kind filter"
+                title={t("decisions.filterKind")}
                 onChange={(e) => setKind(e.target.value)}>
-          <option value="">Any kind</option>
+          <option value="">{t("decisions.anyKind")}</option>
           {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
         </select>
         <select className="input" style={{ maxWidth: 150 }} value={group}
-                title="Group filter"
+                title={t("decisions.filterGroup")}
                 onChange={(e) => setGroup(e.target.value)}>
-          <option value="">All groups</option>
+          <option value="">{t("filter.allGroups")}</option>
           {groups.map((g) => <option key={g.chat_id} value={g.chat_id}>{g.title}</option>)}
         </select>
         <select className="input" style={{ maxWidth: 130 }} value={sort}
-                title="Sort" onChange={(e) => setSort(e.target.value)}>
-          <option value="recent">Newest</option>
-          <option value="due">Due soonest</option>
-          <option value="confidence">Most confident</option>
+                title={t("decisions.sort")} onChange={(e) => setSort(e.target.value)}>
+          <option value="recent">{t("filter.newestFirst")}</option>
+          <option value="due">{t("decisions.sortDue")}</option>
+          <option value="confidence">{t("decisions.sortConfidence")}</option>
         </select>
         <span style={{ flex: 1 }} />
-        <button className="btn ghost sm" title="Deterministic keyword check - also runs after every sync"
-                onClick={() => void checkFollowups()}>Check follow-ups</button>
-        <button className="btn ghost sm" onClick={() => void act(() => api.exportDecisions("md"), "Exported")}>Export .md</button>
-        <button className="btn ghost sm" onClick={() => void act(() => api.exportDecisions("json"), "Exported")}>.json</button>
+        <button className="btn ghost sm" title={t("decisions.checkFollowupsHint")}
+                onClick={() => void checkFollowups()}>
+          <Ic.RefreshCw size={13} /> {t("decisions.checkFollowups")}
+        </button>
+        <button className="btn ghost sm"
+                onClick={() => void act(() => api.exportDecisions("md"), t("decisions.exported"))}>
+          <Ic.FileDown size={13} /> {t("decisions.exportMd")}
+        </button>
+        <button className="btn ghost sm"
+                onClick={() => void act(() => api.exportDecisions("json"), t("decisions.exported"))}>
+          <Ic.FileDown size={13} /> {t("decisions.exportJson")}
+        </button>
         <button className="btn primary sm" disabled={!aiOn}
-                title={aiOn ? "Analyze the archive for decisions and commitments" : "Configure an AI provider first"}
-                onClick={() => setExtractOpen(true)}>Extract decisions</button>
+                title={aiOn ? t("decisions.extractHint") : t("decisions.aiNeeded")}
+                onClick={() => setExtractOpen(true)}>
+          <Ic.Sparkles size={13} /> {t("decisions.extract")}
+        </button>
       </div>
 
       {monitor && monitor.open > 0 && (
         <div className="deal-auto-row">
           <span className="dim" style={{ fontSize: 12 }}>
-            <b>{monitor.open}</b> open
+            <b>{monitor.open}</b> {t("decisions.openLabel")}
           </span>
           {monitor.overdue > 0 && (
-            <button className="badge err" title="Show overdue decisions"
+            <button className="badge err" title={t("decisions.showOverdue")}
                     onClick={() => setStatus("overdue")}>
-              {monitor.overdue} overdue
+              <Ic.CircleAlert size={10} /> {t("decisions.nOverdue", { n: monitor.overdue })}
             </button>
           )}
           {monitor.due_soon > 0 && (
-            <span className="badge warn" title="Due within 7 days">
-              {monitor.due_soon} due soon
+            <span className="badge warn" title={t("decisions.dueSoonHint")}>
+              <Ic.Clock size={10} /> {t("decisions.nDueSoon", { n: monitor.due_soon })}
             </span>
           )}
           {monitor.with_followups > 0 && (
-            <span className="badge" title="Decisions with newer messages discussing them">
-              {monitor.with_followups} with follow-ups
+            <span className="badge" title={t("decisions.followupsHint")}>
+              <Ic.MessageSquare size={10} />
+              {t("decisions.nWithFollowups", { n: monitor.with_followups })}
             </span>
           )}
           <span className="dim" style={{ fontSize: 12 }}>
-            follow-up checks run after every sync
+            {t("decisions.followupsNote")}
           </span>
         </div>
       )}
 
       {settings && (
         <div className="deal-auto-row">
-          <label className="chip static" title="After each sync, analyze only the new messages">
+          <label className="chip static" title={t("decisions.autoHint")}>
             <input type="checkbox" checked={settings.auto}
                    onChange={(e) => void (async () => {
                      try {
                        const r = await api.decisionsAuto(e.target.checked);
                        setSettings({ ...settings, auto: r.auto });
-                       toast(r.auto ? "Auto-extraction on" : "Auto-extraction off", "info");
+                       toast(r.auto ? t("decisions.autoOn") : t("decisions.autoOff"), "info");
                      } catch (err) { toast((err as Error).message, "err"); }
                    })()} />
-            auto-extract new messages after each sync
+            {t("decisions.autoLabel")}
           </label>
           <span className="dim" style={{ fontSize: 12 }}>
-            extraction sends candidate message excerpts to {appState?.ai_provider_host}
+            {t("decisions.autoNote", { host: appState?.ai_provider_host ?? "" })}
           </span>
         </div>
       )}
@@ -213,32 +230,33 @@ export function DecisionsView() {
         )}
         {rows !== null && rows.length === 0 && (
           <EmptyState
-            icon="⚖"
-            title={q || status || kind ? "No decisions match" : "No decisions yet"}
+            icon="Scale"
+            title={q || status || kind ? t("decisions.noMatch") : t("decisions.empty")}
             hint={q || status || kind
-              ? "Try different filters."
+              ? t("decisions.tryDifferent")
               : aiOn
-                ? "Run \"Extract decisions\" to analyze your groups for decisions, commitments, and plans. Extraction only sends candidate messages - never your whole archive."
-                : "Configure an AI provider (Settings) to enable extraction, or add decisions manually."}
+                ? t("decisions.emptyAiHint")
+                : t("decisions.emptyNoAiHint")}
           />
         )}
         {rows !== null && rows.map((d) => (
-          <DecisionCard key={d.id} d={d} open={expanded === d.id}
+          <DecisionCard key={d.id} d={d} open={expanded === d.id} t={t}
                         onToggle={() => setExpanded(expanded === d.id ? null : d.id)}
                         onChanged={() => void load()} />
         ))}
       </div>
 
       {extractOpen && (
-        <ExtractModal onClose={() => setExtractOpen(false)}
+        <ExtractModal onClose={() => setExtractOpen(false)} t={t}
                       groups={groups} onStart={startExtract} />
       )}
     </div>
   );
 }
 
-function DecisionCard({ d, open, onToggle, onChanged }: {
+function DecisionCard({ d, open, onToggle, onChanged, t }: {
   d: Decision; open: boolean; onToggle: () => void; onChanged: () => void;
+  t: T;
 }) {
   const { toast } = useStore();
   const [owner, setOwner] = useState(d.owner ?? "");
@@ -260,39 +278,62 @@ function DecisionCard({ d, open, onToggle, onChanged }: {
         <div className="deal-main">
           <div className="deal-title" dir="auto">
             {d.title}
-            {d.user_status === "confirmed" && <span className="badge good" style={{ marginInlineStart: 6 }}>✓ confirmed</span>}
+            {d.user_status === "confirmed" && (
+              <span className="badge good" style={{ marginInlineStart: 6 }}>
+                <Ic.Check size={10} /> {t("decisions.badgeConfirmed")}
+              </span>
+            )}
             {d.followup_count > 0 && (
               <span className="badge" style={{ marginInlineStart: 6 }}
-                    title={`${d.followup_count} newer message(s) discuss this decision`}>
-                ⇢ {d.followup_count} follow-up{d.followup_count === 1 ? "" : "s"}
+                    title={t("decisions.followupsTitle", { n: d.followup_count })}>
+                <Ic.MessageSquare size={10} /> {t(d.followup_count === 1
+                  ? "decisions.followupOne" : "decisions.followupMany",
+                  { n: d.followup_count })}
               </span>
             )}
           </div>
           <div className="deal-meta" dir="auto">
             {d.kind && <span className="dim">{d.kind}</span>}
-            {d.owner && <span>👤 {d.owner}</span>}
-            {d.due_date && <span>↳ {d.due_date}</span>}
-            {d.due_soon && <span className="badge warn">due soon</span>}
-            <span className="dim">· {d.sources.length} source{d.sources.length === 1 ? "" : "s"}</span>
-            <span className="dim">· {d.confidence_label} confidence</span>
+            {d.owner && (
+              <span className="meta-ic">
+                <Ic.User size={11} /> {d.owner}
+              </span>
+            )}
+            {d.due_date && (
+              <span className="meta-ic">
+                <Ic.CornerUpLeft size={11} /> {d.due_date}
+              </span>
+            )}
+            {d.due_soon && <span className="badge warn">{t("decisions.dueSoon")}</span>}
+            <span className="dim">
+              · {t(d.sources.length === 1 ? "decisions.sourceOne" : "decisions.sourceMany",
+                    { n: d.sources.length })}
+            </span>
+            <span className="dim">
+              · {t("decisions.confidence", { label: d.confidence_label })}
+            </span>
           </div>
         </div>
         <span className={`badge ${statusTone(d.derived_status)}`}>{d.derived_status}</span>
+        <span className="row-chev"><Ic.ChevronDown size={14} /></span>
       </div>
 
       {open && (
         <div className="deal-detail">
           {d.detail && <p className="deal-desc" dir="auto">{d.detail}</p>}
           <div className="deal-sources">
-            <span className="label">Sources ({d.sources.length})</span>
+            <span className="label">{t("decisions.sourcesLabel", { n: d.sources.length })}</span>
             {d.sources.map((s, i) => (
               <div key={i} className="src-row" dir="auto">
                 <span className="src-title">{s.chat_title ?? "?"}</span>
                 <span className="src-date">{(s.date ?? "").slice(0, 10)}</span>
-                <span className="src-text">{(s.text ?? "[deleted from archive]").slice(0, 120)}</span>
+                <span className="src-text">
+                  {(s.text ?? t("decisions.deletedFromArchive")).slice(0, 120)}
+                </span>
                 {s.tg_link && (
-                  <button className="link" onClick={() => window.open(s.tg_link!, "_blank", "noopener")}>
-                    Telegram ↗
+                  <button className="link"
+                          onClick={() => window.open(s.tg_link!, "_blank", "noopener")}>
+                    <Ic.ExternalLink size={11} /> {t("action.openTelegram")}
                   </button>
                 )}
               </div>
@@ -301,17 +342,19 @@ function DecisionCard({ d, open, onToggle, onChanged }: {
           {d.followups.length > 0 && (
             <div className="deal-sources">
               <span className="label">
-                Follow-ups ({d.followup_count}) — newer messages about this
-                decision
+                {t("decisions.followupsLabel", { n: d.followup_count })}
               </span>
               {d.followups.map((f, i) => (
                 <div key={`fu${i}`} className="src-row" dir="auto">
                   <span className="src-title">{f.chat_title ?? "?"}</span>
                   <span className="src-date">{(f.date ?? "").slice(0, 10)}</span>
-                  <span className="src-text">{(f.text ?? "[deleted from archive]").slice(0, 120)}</span>
+                  <span className="src-text">
+                    {(f.text ?? t("decisions.deletedFromArchive")).slice(0, 120)}
+                  </span>
                   {f.tg_link && (
-                    <button className="link" onClick={() => window.open(f.tg_link!, "_blank", "noopener")}>
-                      Telegram ↗
+                    <button className="link"
+                            onClick={() => window.open(f.tg_link!, "_blank", "noopener")}>
+                      <Ic.ExternalLink size={11} /> {t("action.openTelegram")}
                     </button>
                   )}
                 </div>
@@ -321,36 +364,36 @@ function DecisionCard({ d, open, onToggle, onChanged }: {
           <div className="deal-actions">
             {d.user_status !== "confirmed" && (
               <button className="btn primary sm"
-                      onClick={() => void patch({ user_status: "confirmed" }, "Confirmed ✓")}>
-                ✓ Confirm
+                      onClick={() => void patch({ user_status: "confirmed" }, t("decisions.confirmed"))}>
+                <Ic.Check size={13} /> {t("action.confirm")}
               </button>
             )}
             <button className="btn ghost sm"
-                    onClick={() => void patch({ user_status: "dismissed" }, "Dismissed")}>
-              Dismiss
+                    onClick={() => void patch({ user_status: "dismissed" }, t("decisions.dismissed"))}>
+              {t("decisions.dismiss")}
             </button>
             {d.status !== "completed" && (
               <button className="btn ghost sm"
-                      onClick={() => void patch({ status: "completed" }, "Marked completed")}>
-                Mark completed
+                      onClick={() => void patch({ status: "completed" }, t("decisions.markedCompleted"))}>
+                <Ic.CircleCheck size={13} /> {t("decisions.markCompleted")}
               </button>
             )}
-            <span className="date-range" title="Correct the owner">
+            <span className="date-range" title={t("decisions.correctOwner")}>
               <input className="input" style={{ width: 130 }} dir="auto"
-                     placeholder="Owner…" value={owner}
+                     placeholder={t("decisions.ownerPlaceholder")} value={owner}
                      onChange={(e) => setOwner(e.target.value)} />
               <button className="btn ghost sm"
-                      onClick={() => void patch({ owner: owner || null }, "Owner updated")}>
-                Save owner
+                      onClick={() => void patch({ owner: owner || null }, t("decisions.ownerUpdated"))}>
+                <Ic.Save size={13} /> {t("decisions.saveOwner")}
               </button>
             </span>
-            <span className="date-range" title="Correct the due date">
+            <span className="date-range" title={t("decisions.correctDue")}>
               <input type="date" className="input" style={{ width: 140 }}
                      value={due}
                      onChange={(e) => setDue(e.target.value)} />
               <button className="btn ghost sm"
-                      onClick={() => void patch({ due_date: due || null }, "Due date updated")}>
-                Save due date
+                      onClick={() => void patch({ due_date: due || null }, t("decisions.dueUpdated"))}>
+                <Ic.Save size={13} /> {t("decisions.saveDue")}
               </button>
             </span>
             <span style={{ flex: 1 }} />
@@ -358,11 +401,11 @@ function DecisionCard({ d, open, onToggle, onChanged }: {
                     onClick={() => void (async () => {
                       try {
                         await api.decisionDelete(d.id);
-                        toast("Decision deleted", "info");
+                        toast(t("decisions.deleted"), "info");
                         onChanged();
                       } catch (e) { toast((e as Error).message, "err"); }
                     })()}>
-              Delete
+              <Ic.Trash size={13} /> {t("action.delete")}
             </button>
           </div>
         </div>
@@ -371,33 +414,29 @@ function DecisionCard({ d, open, onToggle, onChanged }: {
   );
 }
 
-function ExtractModal({ onClose, groups, onStart }: {
+function ExtractModal({ onClose, groups, onStart, t }: {
   onClose: () => void;
   groups: { chat_id: number; title: string }[];
   onStart: (chatIds: number[], from?: string, to?: string) => void;
+  t: T;
 }) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
   return (
-    <Modal title="Extract decisions" onClose={onClose}
+    <Modal title={t("decisions.extract")} onClose={onClose}
            footer={
              <>
-               <button className="btn ghost sm" onClick={onClose}>Cancel</button>
+               <button className="btn ghost sm" onClick={onClose}>{t("action.cancel")}</button>
                <button className="btn primary sm"
                        onClick={() => onStart([...selected], from || undefined, to || undefined)}>
-                 Start extraction
+                 <Ic.Play size={13} /> {t("decisions.startExtract")}
                </button>
              </>
            }>
-      <p className="mm-note dim">
-        Analyzes messages that match decision/commitment keywords inside the
-        selected scope, then sends only those candidates (in batches) to your
-        AI provider. Existing decisions are merged by identity - never
-        duplicated. The job and its progress are visible in Jobs.
-      </p>
-      <div className="label">Scope</div>
+      <p className="mm-note dim">{t("decisions.extractNote")}</p>
+      <div className="label">{t("decisions.scope")}</div>
       <div className="chips" style={{ margin: "6px 0 10px" }}>
         {groups.map((g) => (
           <button key={g.chat_id}
@@ -411,13 +450,13 @@ function ExtractModal({ onClose, groups, onStart }: {
             {g.title}
           </button>
         ))}
-        {groups.length === 0 && <span className="dim">No tracked groups yet.</span>}
+        {groups.length === 0 && <span className="dim">{t("decisions.noGroups")}</span>}
       </div>
-      <div className="label">Date range (optional)</div>
+      <div className="label">{t("decisions.dateRange")}</div>
       <div className="date-range" style={{ marginTop: 6 }}>
         <input type="date" className="input" style={{ width: 140 }} value={from}
                onChange={(e) => setFrom(e.target.value)} />
-        <span>→</span>
+        <span><Ic.ArrowRight size={13} /></span>
         <input type="date" className="input" style={{ width: 140 }} value={to}
                onChange={(e) => setTo(e.target.value)} />
       </div>

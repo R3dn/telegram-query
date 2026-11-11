@@ -32,6 +32,7 @@ from api import ai as ai_api
 from api import archive, general, groups
 from api import auth as auth_api
 from api import bookmarks as bookmarks_api
+from api import data as data_api
 from api import deals as deals_api
 from api import decisions as decisions_api
 from api import digests as digests_api
@@ -51,7 +52,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("tgq")
 
-WEB_DIST = config.APP_ROOT / "web" / "dist"
+# Built React frontend. Frozen builds: inside the PyInstaller support dir
+# (bundled as data files); source runs: <repo>/web/dist (unchanged).
+WEB_DIST = config.WEB_DIST
 
 db.init_db()
 
@@ -178,7 +181,7 @@ for router in (general.router, auth_api.router, archive.router,
                exports_api.router, deals_api.router, research_api.router,
                monitor_api.router, faqs_api.router, digests_api.router,
                discover_api.router, decisions_api.router,
-               evidence_api.router):
+               evidence_api.router, data_api.router):
     app.include_router(router)
 
 

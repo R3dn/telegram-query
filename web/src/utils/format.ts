@@ -61,7 +61,14 @@ export function daysAgoIso(days: number): string {
   return isoDay(new Date(Date.now() - days * 864e5));
 }
 
-/** Human label for background job names (shared by sidebar/jobs/store). */
+/** i18n key for a background job name (resolve with t()). */
+export function jobKey(name: string | null | undefined): string {
+  const known = ["sync", "track", "dialogs", "auth", "reindex", "discover",
+    "extract", "decisions", "brief"];
+  return known.includes(name ?? "") ? `job.${name}` : "job.unknown";
+}
+
+/** Human label for background job names (English; prefer t(jobKey(n))). */
 export function jobLabel(name: string | null | undefined): string {
   return (
     {
@@ -98,7 +105,23 @@ export function statusTone(status: string): string {
   )[status] ?? "";
 }
 
-/** Human label for a scheduler interval in minutes. */
+/** i18n key for a scheduler interval (resolve with t()). */
+export function intervalKey(min: number): string {
+  if (min % 1440 === 0) return min === 1440
+    ? "interval.everyDay" : "interval.everyDays";
+  if (min % 60 === 0) return "interval.everyHours";
+  return "interval.everyMin";
+}
+
+/** The {n} value that pairs with intervalKey(min). */
+export function intervalN(min: number): number {
+  if (min % 1440 === 0) return min / 1440;
+  if (min % 60 === 0) return min / 60;
+  return min;
+}
+
+/** Human label for a scheduler interval in minutes (English; prefer
+ *  t(intervalKey(n), {n})). */
 export function intervalLabel(min: number): string {
   if (min % 1440 === 0) return min === 1440 ? "every day" : `every ${min / 1440} days`;
   if (min % 60 === 0) return `every ${min / 60}h`;

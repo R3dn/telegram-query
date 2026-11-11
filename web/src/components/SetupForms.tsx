@@ -1,8 +1,25 @@
 /** Shared setup forms used by the onboarding wizard and the settings modal.
  *  Store-free by design: everything comes in via props, so tests stay easy
- *  and secrets never wander into global state. */
+ *  and secrets never wander into global state.
+ *  `t` is optional: without it the English table is used directly, so the
+ *  forms also render standalone (tests, zero-provider usage). */
 import { useState } from "react";
 import { api } from "../api/client";
+import { Ic } from "../design/icons";
+import { dict as EN } from "../i18n/en/onboarding";
+
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+/** English-only fallback resolver for when no `t` is passed in. */
+const tEn: TFn = (key, vars) => {
+  let s = EN[key] ?? key;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) {
+      s = s.replaceAll(`{${k}}`, String(v));
+    }
+  }
+  return s;
+};
 
 function SecretInput(props: {
   id: string;
@@ -11,8 +28,10 @@ function SecretInput(props: {
   value: string;
   onChange: (v: string) => void;
   numeric?: boolean;
+  t: TFn;
 }) {
   const [show, setShow] = useState(false);
+  const t = props.t;
   return (
     <label className="field" htmlFor={props.id}>
       <span>{props.label}</span>
@@ -36,7 +55,7 @@ function SecretInput(props: {
           onClick={() => setShow((s) => !s)}
           tabIndex={-1}
         >
-          {show ? "hide" : "show"}
+          {show ? t("onboarding.form.hide") : t("onboarding.form.show")}
         </button>
       </span>
     </label>
@@ -47,7 +66,9 @@ function SecretInput(props: {
 export function CredsForm(props: {
   onSaved: () => void | Promise<void>;
   submitLabel?: string;
+  t?: TFn;
 }) {
+  const t = props.t ?? tEn;
   const [apiId, setApiId] = useState("");
   const [apiHash, setApiHash] = useState("");
   const [busy, setBusy] = useState(false);
@@ -71,16 +92,18 @@ export function CredsForm(props: {
 
   return (
     <div>
-      <SecretInput id="tg-api-id" label="API ID"
+      <SecretInput id="tg-api-id" t={t} label={t("onboarding.form.apiId")}
         placeholder="123456" value={apiId} onChange={setApiId} numeric />
-      <SecretInput id="tg-api-hash" label="API hash"
+      <SecretInput id="tg-api-hash" t={t} label={t("onboarding.form.apiHash")}
         placeholder="0123456789abcdef0123456789abcdef" value={apiHash}
         onChange={setApiHash} />
       {error && <p className="ai-error">{error}</p>}
       <div className="wizard-actions">
         <button className="btn primary" disabled={busy || !apiId.trim() || apiHash.trim().length < 8}
           onClick={() => void save()}>
-          {busy ? "Saving…" : props.submitLabel ?? "Save & continue"}
+          {busy
+            ? <><Ic.Spin size={13} className="spin" /> {t("onboarding.form.saving")}</>
+            : props.submitLabel ?? t("onboarding.form.saveContinue")}
         </button>
       </div>
     </div>
@@ -95,18 +118,28 @@ const PRESETS: { name: string; base?: string; model?: string }[] = [
   { name: "Custom…" },
 ];
 
+/** Display label for a preset (the value stays the canonical English name
+ *  so preset matching and tests keep working). */
+function presetLabel(t: TFn, name: string): string {
+  if (name === "Ollama (local)") return t("onboarding.form.presetOllama");
+  if (name === "Custom…") return t("onboarding.form.presetCustom");
+  return name;
+}
+
 /** AI provider: preset dropdown + endpoint + key + model + live test. */
 export function AiProviderForm(props: {
   onSaved: () => void | Promise<void>;
   submitLabel?: string;
+  t?: TFn;
 }) {
+  const t = props.t ?? tEn;
   const [preset, setPreset] = useState("OpenAI");
   const [baseUrl, setBaseUrl] = useState(PRESETS[0].base);
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(PRESETS[0].model ?? "");
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const pickPreset = (name: string) => {
@@ -123,9 +156,13 @@ export function AiProviderForm(props: {
     setTestResult(null);
     try {
       const r = await api.testAi({ base_url: baseUrl, api_key: apiKey, model });
-      setTestResult(r.ok ? `✓ ${r.model} replied — connection works` : `✗ ${r.error}`);
+      setTestResult(
+        r.ok
+          ? { ok: true, text: t("onboarding.form.testOk", { model: r.model ?? "" }) }
+          : { ok: false, text: r.error ?? "" },
+      );
     } catch (e) {
-      setTestResult(`✗ ${(e as Error).message}`);
+      setTestResult({ ok: false, text: (e as Error).message });
     } finally {
       setTesting(false);
     }
@@ -150,45 +187,52 @@ export function AiProviderForm(props: {
   return (
     <div>
       <label className="field">
-        <span>Provider preset</span>
+        <span>{t("onboarding.form.preset")}</span>
         <select className="input" value={preset} onChange={(e) => pickPreset(e.target.value)}>
-          {PRESETS.map((p) => <option key={p.name}>{p.name}</option>)}
+          {PRESETS.map((p) => (
+            <option key={p.name} value={p.name}>{presetLabel(t, p.name)}</option>
+          ))}
         </select>
       </label>
       <label className="field">
-        <span>Endpoint (base URL)</span>
+        <span>{t("onboarding.form.endpoint")}</span>
         <input className="input" dir="ltr" value={baseUrl} placeholder="https://api.openai.com/v1"
           onChange={(e) => { setBaseUrl(e.target.value); setTestResult(null); }} />
       </label>
-      <SecretInput id="ai-api-key" label="API key"
-        placeholder={preset === "Ollama (local)" ? "any non-empty value (e.g. ollama)" : "sk-…"}
+      <SecretInput id="ai-api-key" t={t} label={t("onboarding.form.apiKey")}
+        placeholder={preset === "Ollama (local)" ? t("onboarding.form.keyAny") : "sk-…"}
         value={apiKey} onChange={(v) => { setApiKey(v); setTestResult(null); }} />
       <label className="field">
-        <span>Model</span>
+        <span>{t("onboarding.form.model")}</span>
         <input className="input" dir="ltr" value={model} placeholder="gpt-4o-mini"
           onChange={(e) => { setModel(e.target.value); setTestResult(null); }} />
       </label>
 
       {testResult && (
-        <p className="mm-note" style={{ color: testResult.startsWith("✓") ? "var(--good)" : "var(--err)" }}>
-          {testResult}
+        <p className={`test-result ${testResult.ok ? "ok" : "bad"}`}>
+          {testResult.ok ? <Ic.CircleCheck size={14} /> : <Ic.CircleX size={14} />}
+          {" "}{testResult.text}
         </p>
       )}
       {error && <p className="ai-error">{error}</p>}
 
       <div className="wizard-actions">
         <button className="btn ghost" disabled={testing || !apiKey.trim()} onClick={() => void test()}>
-          {testing ? "Testing…" : "Test connection"}
+          {testing
+            ? <><Ic.Spin size={13} className="spin" /> {t("onboarding.form.testing")}</>
+            : t("onboarding.form.test")}
         </button>
         <span style={{ flex: 1 }} />
         <button className="btn primary" disabled={busy || !apiKey.trim()}
           onClick={() => void save()}>
-          {busy ? "Saving…" : props.submitLabel ?? "Save & continue"}
+          {busy
+            ? <><Ic.Spin size={13} className="spin" /> {t("onboarding.form.saving")}</>
+            : props.submitLabel ?? t("onboarding.form.saveContinue")}
         </button>
       </div>
       <p className="mm-note dim">
-        The key is stored in your local <code className="kbd">.env</code> file and
-        is never shown again or sent back to the browser.
+        {t("onboarding.form.keyNote.a")} <code className="kbd">.env</code>{" "}
+        {t("onboarding.form.keyNote.b")}
       </p>
     </div>
   );

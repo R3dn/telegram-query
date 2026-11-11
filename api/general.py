@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 import auth
 import config
 import db
+import desktop
 
 from . import open_db
 
@@ -46,6 +47,23 @@ def readiness():
     }
 
 
+@router.post("/api/app/quit")
+def quit_app():
+    """Explicit Exit (desktop mode). The packaged app's UI sends this;
+    the desktop runtime stops Uvicorn, which runs the FastAPI lifespan's
+    graceful shutdown (running jobs cancel at their next checkpoint).
+    In a source run there is no desktop runtime to stop - reported
+    honestly instead of pretending to quit.
+    """
+    if not desktop.request_quit():
+        return JSONResponse(
+            {"ok": False,
+             "error": "No desktop runtime in this process "
+                      "(source run) - stop the dev server with Ctrl+C."},
+            status_code=409)
+    return {"ok": True}
+
+
 @router.get("/api/app/state")
 def app_state():
     """Everything the UI needs to pick the right screen: wizard, empty
@@ -54,6 +72,7 @@ def app_state():
         s = db.stats(conn)
     return {
         "version": config.__version__,
+        "desktop_mode": desktop.is_desktop(),
         "telegram_configured": config.settings.telegram_configured,
         "authenticated": auth.AUTH_STATE["authenticated"],
         "auth_user": auth.AUTH_STATE["user"],

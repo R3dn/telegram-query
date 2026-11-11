@@ -1,6 +1,7 @@
 /** Telegram Query app shell: layout, wizard gating, panels, modals. */
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "./state/store";
+import { useLang } from "./i18n";
 import { Sidebar } from "./components/Sidebar";
 import { SearchBar } from "./components/SearchBar";
 import { FilterBar } from "./components/FilterBar";
@@ -21,6 +22,7 @@ import { ManageGroups } from "./components/ManageGroups";
 import { SettingsModal } from "./components/SettingsModal";
 import { Onboarding } from "./components/Onboarding";
 import { Toasts } from "./components/Toasts";
+import { Ic } from "./design/icons";
 
 function shouldShowWizard(
   s: ReturnType<typeof useStore>["appState"],
@@ -111,6 +113,7 @@ export default function App() {
 
 function RightPanel() {
   const { rightTab, setRightTab } = useStore();
+  const { t } = useLang();
   const [width, setWidth] = useState(() =>
     parseInt(localStorage.getItem("tgq-right-w") ?? "360", 10),
   );
@@ -149,29 +152,43 @@ function RightPanel() {
 
   return (
     <aside
-      className={`right ${hidden && !narrow ? "hidden" : ""} ${narrow ? "" : ""}`}
+      className={`right ${hidden && !narrow ? "hidden" : ""}`}
       style={narrow ? undefined : { width, maxWidth: "50vw" }}
     >
       {!narrow && (
         <div
           className="resize-handle"
           onPointerDown={onPointerDown}
-          title="Drag to resize"
+          title={t("panel.dragResize")}
         />
       )}
       <div className="right-tabs">
-        <button className={`tab ${rightTab === "ai" ? "on" : ""}`} onClick={() => setRightTab("ai")}>✦ Ask AI</button>
-        <button className={`tab ${rightTab === "details" ? "on" : ""}`} onClick={() => setRightTab("details")}>Details</button>
+        <button
+          className={`tab ${rightTab === "ai" ? "on" : ""}`}
+          onClick={() => setRightTab("ai")}
+        >
+          <Ic.Sparkles size={14} /> {t("panel.askAi")}
+        </button>
+        <button
+          className={`tab ${rightTab === "details" ? "on" : ""}`}
+          onClick={() => setRightTab("details")}
+        >
+          {t("panel.details")}
+        </button>
         <span style={{ flex: 1 }} />
         <button
           className="btn ghost sm"
-          title={hidden ? "Show panel" : "Hide panel"}
+          title={hidden ? t("panel.show") : t("panel.hide")}
           onClick={() => {
             if (narrow) document.body.classList.remove("tgq-right-open");
             else setHidden((h) => !h);
           }}
         >
-          {narrow ? "✕" : hidden ? "«" : "»"}
+          {narrow
+            ? <Ic.Close size={13} />
+            : hidden
+              ? <Ic.PanelRightOpen size={14} />
+              : <Ic.PanelRightClose size={14} />}
         </button>
       </div>
       <div className="right-body">
@@ -183,6 +200,7 @@ function RightPanel() {
 
 function MobileNav() {
   const { setMode, setRightTab, setModal, mode } = useStore();
+  const { t } = useLang();
 
   const open = (cls: "tgq-side-open" | "tgq-right-open") => {
     document.body.classList.remove("tgq-side-open", "tgq-right-open");
@@ -198,20 +216,20 @@ function MobileNav() {
       <nav className="bottom-nav">
         <button onClick={() => { setMode("discover"); document.body.classList.remove("tgq-side-open", "tgq-right-open"); }}
           className={mode === "discover" ? "on" : ""}>
-          <span className="bic">📈</span> Discover
+          <span className="bic"><Ic.TrendingUp size={19} /></span> {t("nav.discover")}
         </button>
         <button onClick={() => { setMode("browse"); document.body.classList.remove("tgq-side-open", "tgq-right-open"); }}
           className={mode === "browse" || mode === "search" ? "on" : ""}>
-          <span className="bic">🔍</span> Browse
+          <span className="bic"><Ic.Search size={19} /></span> {t("nav.browseShort")}
         </button>
         <button onClick={() => open("tgq-side-open")}>
-          <span className="bic">👥</span> Groups
+          <span className="bic"><Ic.Users size={19} /></span> {t("nav.groups")}
         </button>
         <button onClick={() => { setRightTab("ai"); open("tgq-right-open"); }}>
-          <span className="bic">✦</span> Ask AI
+          <span className="bic"><Ic.Sparkles size={19} /></span> {t("nav.askAi")}
         </button>
         <button onClick={() => setModal("jobs")}>
-          <span className="bic">⇄</span> Jobs
+          <span className="bic"><Ic.RefreshCw size={19} /></span> {t("nav.jobs")}
         </button>
       </nav>
     </>

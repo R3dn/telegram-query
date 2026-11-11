@@ -1,0 +1,19 @@
+/* FAQs workspace. */
+.faq-answer { font-size: var(--fs-menu); line-height: 1.65; margin-top: 8px; }
+.faq-answer p { margin: 4px 0; }
+.faq-answer code {
+  background: var(--surface-2); padding: 1px 5px; border-radius: var(--r-xs);
+  font-family: var(--mono); font-size: var(--fs-small);
+}
+.faq-answer a { color: var(--accent); }
+.faq-answer ul, .faq-answer ol { margin: 4px 0; padding-inline-start: 22px; }
+
+/* card meta line */
+.fq-sub { font-size: var(--fs-small); }
+
+/* candidate "no answer" note (bm-note base is warn-tinted — soften) */
+.fq-note {
+  background: var(--surface-2);
+  border-inline-start-color: var(--border-strong);
+  font-size: var(--fs-small);
+}

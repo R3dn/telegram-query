@@ -1,0 +1,15 @@
+/* Entities workspace. */
+.entity-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 9px 22px; border-bottom: 1px solid var(--border-soft);
+  transition: background var(--dur-1) var(--ease);
+}
+.entity-row:hover { background: var(--surface); }
+.entity-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  background: none; border: none; cursor: pointer; text-align: start; padding: 0;
+}
+.entity-main:hover .g-title { color: var(--accent); }
+.entity-detail { padding: 14px 22px; }
+.entity-detail .bm-head { margin-bottom: 10px; }
+.entity-detail .label { margin: 10px 0 2px; display: block; }

@@ -58,7 +58,9 @@ session, zero external services.
 
 | File | Role |
 |---|---|
-| `config.py` | Single `Settings` object; env parsing, aliases, path resolution, normalization level, model routing (`AI_MODEL_EXTRACT/SYNTH/EMBED` with `AI_MODEL` fallback), daily AI cap |
+| `config.py` | Single `Settings` object; env parsing, aliases, path resolution, normalization level, model routing (`AI_MODEL_EXTRACT/SYNTH/EMBED` with `AI_MODEL` fallback), daily AI cap. v1.0: frozen-aware paths — source runs keep `<repo>/data`, packaged builds move mutable data to `%LOCALAPPDATA%\TelegramQuery` and the `.env` there; `reload_settings()` after migration |
+| `desktop.py` | v1.0 desktop runtime for packaged builds: named-mutex single instance, legacy-archive migration hook, rotating file log, loopback-only Uvicorn in a worker thread, busy-port fallback (actual port discoverable via `runtime.json`), health-gated browser open (no blind sleeps), explicit quit (`POST /api/app/quit`) with graceful shutdown, native error dialogs pointing at the log |
+| `migration.py` | v1.0 copy-based archive migration into the user data dir (never overwrites: backup, idempotent, interrupt-safe, SQLite backup-API restore, preserves session + settings) |
 | `app.py` | Thin entry: routers, static serving (immutable hashed assets, v9 security headers), startup threads, graceful shutdown (v9: cancel running job, clean state), post-sync + tick hook registration, upgrade backfill jobs (reindex, discovery), non-loopback bind warning |
 | `api/` | HTTP routers grouped by domain; each opens its own DB connection; `/api/health/ready` readiness (v9) |
 | `db.py` | Schema + versioned migrations (v9: composite keyset index `(date,chat_id,msg_id)` with row-value cursors, `chat_sender`/`reply` indexes, one-time ANALYZE + post-sync `analyze_if_stale` maintenance), WAL + `synchronous=NORMAL`, fast-path upserts (FTS upkeep only when text changes), upserts with **incremental FTS upkeep**, keyset-paginated browse, rank-subquery search (filters before LIMIT, joins after), single-query round-robin `search_diverse`, settings KV, verified `t.me` link builder, conversation reconstruction |
@@ -77,7 +79,7 @@ session, zero external services.
 | `faq.py` | Question detection (shared with the radar) + conservative clustering; drafted answers stay `candidate` until a human approves |
 | `discover.py` | v0.7 discovery engine: incremental daily term counts (`term_daily`), deterministic burst-scored trending, cross-group story clustering, group activity aggregates (never per-member), unanswered-questions radar (watermark-incremental, auto-resolving, human-gated), and the AI topic timeline (synth model, citation-validated, cached) |
 | `entities.py` | v0.7 entity gazetteer: deterministic seeds (deal vendors) + manual adds + opt-in LLM discovery (extract model, cached); deterministic mention matching over `text_norm`; never individual people |
-| `web/` | React + TypeScript source (Vite); production build committed to `web/dist/` |
+| `web/` | React + TypeScript source (Vite); production build committed to `web/dist/`; v1.0 design system in `web/src/design/` (tokens, Lucide icon namespace, per-view CSS), bilingual UI (EN/AR + true RTL) in `web/src/i18n/` |
 
 ## Key decisions
 
@@ -163,3 +165,43 @@ liveness (`/api/health`) and readiness (`/api/health/ready`) are
 separate, shutdown is graceful, and `scripts/benchmark.py` +
 `scripts/backup_db.py` make performance and backups repeatable
 operations rather than hopes.
+
+## Desktop packaging (v1.0)
+
+The Windows product is one process, same as source runs — packaging
+only changes *where files live* and *who owns the lifecycle*:
+
+```
+TelegramQuery-Setup-x64.exe        Burn bootstrapper (license UI, chains
+                                   the MSI; the only ARP entry)
+  └─ TelegramQuery-x64.msi         perMachine MSI, MajorUpgrade, both
+     └─ TelegramQuery/             PyInstaller onedir (windowed, no
+        ├─ TelegramQuery.exe         console): desktop.py entry, app +
+        └─ _internal/                api/ + web/dist bundled read-only
+```
+
+- **One pipeline, two artifacts**: `scripts/build_windows.py` builds the
+  frontend (`scripts/build_frontend.py`, version-checked against
+  `config.__version__`), freezes with the spec in
+  `packaging/windows/pyinstaller/`, harvests with WiX `heat`, links the
+  MSI and the Burn bundle from the same `TelegramQuery.wxs` definition,
+  and writes `dist/release/` with SHA-256 checksums. CI runs it on
+  `windows-2022` and uploads the artifacts.
+- **Upgrade identity** comes from fixed `UpgradeCode` GUIDs in the build
+  script (never regenerated); `ProductCode` changes per build, so
+  installing a new MSI over an old one is a MajorUpgrade — files
+  replaced, data untouched, downgrades refused.
+- **Data placement** is the packaged/source split in `config.py`:
+  mutable data (SQLite archive, Telegram session, `.env`, logs) lives in
+  `%LOCALAPPDATA%\TelegramQuery`, never inside Program Files, and
+  survives uninstall by design. The explicit erase
+  (`POST /api/data/erase` + Settings UI) is the only in-app way to
+  remove it.
+- **Security posture is unchanged**: the desktop runtime forces a
+  loopback bind, the API never returns secrets to the frontend, and
+  the bootstrapper runs the same MSI a script would (`msiexec /i …
+  /qn`) — no service, no auto-start, no background anything.
+- **Honest lifecycle**: health-gated browser open, discoverable port
+  (`runtime.json`), single-instance mutex, graceful shutdown through
+  the same FastAPI lifespan as source runs, and crash visibility via a
+  native dialog + rotating log instead of a silent exit.

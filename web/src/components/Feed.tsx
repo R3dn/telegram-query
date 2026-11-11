@@ -1,11 +1,18 @@
 /** The central message feed: infinite scroll, day separators, highlighting,
- *  empty states, and selection. */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+ *  empty states, and selection.
+ *
+ *  Performance contract: MessageCard is memoized and receives only stable
+ *  props (message identity, booleans, a memoized regex, useCallback
+ *  handlers) — a store update (toasts, polling, panel switches) never
+ *  re-renders hundreds of cards. */
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "../api/client";
-import { useStore } from "../state/store";
+import { useStore, type Store } from "../state/store";
+import { useLang } from "../i18n";
 import type { Message } from "../api/types";
 import { dayKey, dayLabel, fmtTime, highlightRegex } from "../utils/format";
 import { EmptyState } from "./EmptyState";
+import { Ic } from "../design/icons";
 
 function HighlightedText({ text, re }: { text: string; re: RegExp | null }) {
   if (!re) return <>{text}</>;
@@ -27,14 +34,17 @@ function HighlightedText({ text, re }: { text: string; re: RegExp | null }) {
   );
 }
 
-function MessageCard({ m, multi, re, active, onSelect }: {
+type Toast = Store["toast"];
+
+const MessageCardImpl = ({ m, multi, re, active, onSelect, toast, t }: {
   m: Message;
   multi: boolean;
   re: RegExp | null;
   active: boolean;
   onSelect: (m: Message) => void;
-}) {
-  const { toast } = useStore();
+  toast: Toast;
+  t: ReturnType<typeof useLang>["t"];
+}) => {
   const [starred, setStarred] = useState(m.bookmarked === 1);
   const [note, setNote] = useState<string | null>(m.bookmark_note ?? null);
 
@@ -51,10 +61,10 @@ function MessageCard({ m, multi, re, active, onSelect }: {
     try {
       if (next) {
         await api.bookmarkSet(m.chat_id, m.msg_id, note ?? "");
-        toast("Bookmarked ⭐", "good");
+        toast(t("feed.marked"), "good");
       } else {
         await api.bookmarkDelete(m.chat_id, m.msg_id);
-        toast("Bookmark removed", "info");
+        toast(t("feed.unmarked"), "info");
       }
     } catch (err) {
       setStarred(!next);  // revert on failure - never fake success
@@ -62,25 +72,24 @@ function MessageCard({ m, multi, re, active, onSelect }: {
     }
   };
 
-  const badges = (
-    <>
-      {m.edited === 1 && <span className="badge" title="edited">✎</span>}
-      {m.has_media === 1 && <span className="badge" title="has image">🖼</span>}
-    </>
-  );
   return (
     <div className={`msg-card ${active ? "active" : ""}`} onClick={() => onSelect(m)}>
       <div className="msg-head">
-        <span className="msg-sender" dir="auto">{m.sender_name || "unknown"}</span>
+        <span className="msg-sender" dir="auto">{m.sender_name || t("feed.unknown")}</span>
         <span className="msg-time">{fmtTime(m.date)}</span>
         {multi && <span className="msg-grp" dir="auto">{m.chat_title}</span>}
-        {badges}
+        {m.edited === 1 && (
+          <span className="badge" title={t("feed.edited")}><Ic.Pencil size={10} /></span>
+        )}
+        {m.has_media === 1 && (
+          <span className="badge" title={t("feed.hasImage")}><Ic.Image size={10} /></span>
+        )}
         <button
           className={`star ${starred ? "on" : ""}`}
-          title={starred ? "Remove bookmark" : "Bookmark this message"}
+          title={starred ? t("feed.unmarkHint") : t("feed.markHint")}
           onClick={(e) => void toggleStar(e)}
         >
-          {starred ? "★" : "☆"}
+          {starred ? <Ic.Star size={13} fill="currentColor" /> : <Ic.Star size={13} />}
         </button>
       </div>
       <div className="msg-body" dir="auto">
@@ -88,7 +97,9 @@ function MessageCard({ m, multi, re, active, onSelect }: {
       </div>
     </div>
   );
-}
+};
+
+const MessageCard = memo(MessageCardImpl);
 
 function DaySep({ day }: { day: string }) {
   return (
@@ -100,11 +111,19 @@ export function Feed() {
   const {
     feed, mode, q, loading, hasMore, loadFeed,
     selection, selected, select, setRightTab,
-    appState, setModal, wizardOpen,
+    appState, setModal, wizardOpen, toast,
   } = useStore();
+  const { t } = useLang();
   const scrollRef = useRef<HTMLDivElement>(null);
   const highlight = useMemo(() => (mode === "search" ? highlightRegex(q) : null), [mode, q]);
   const multi = selection.size !== 1;
+
+  // stable handler identity: keeps every memoized card untouched when
+  // unrelated store state changes
+  const onSelect = useCallback((msg: Message) => {
+    select(msg);
+    setRightTab("details");
+  }, [select, setRightTab]);
 
   // infinite scroll (browse) + jump button visibility
   const onScroll = () => {
@@ -146,31 +165,31 @@ export function Feed() {
 
         {empty && mode === "search" && q && (
           <EmptyState
-            icon="🔍"
-            title="No results"
-            hint={`Nothing matches “${q}” with the current filters. Try different wording, fewer filters, or alternative spellings.`}
+            icon="Search"
+            title={t("feed.noResults")}
+            hint={t("feed.noResultsHint", { q })}
           />
         )}
         {empty && mode === "browse" && (appState?.messages ?? 0) === 0 && !wizardOpen && (
           <EmptyState
-            icon="🗄"
-            title="Your archive is empty"
-            hint="Track some groups and run your first sync to start building a searchable archive of your Telegram messages."
-            action={<button className="btn primary" onClick={() => setModal("manage")}>Manage groups</button>}
+            icon="Database"
+            title={t("feed.archiveEmpty")}
+            hint={t("feed.archiveEmptyHint")}
+            action={<button className="btn primary" onClick={() => setModal("manage")}>{t("groups.manage")}</button>}
           />
         )}
         {empty && mode === "browse" && (appState?.messages ?? 0) > 0 && (
           <EmptyState
-            icon="🗂"
-            title="No messages match"
-            hint="No messages match the current filters. Widen the date range or clear a filter."
+            icon="Layers"
+            title={t("feed.noMatch")}
+            hint={t("feed.noMatchHint")}
           />
         )}
         {empty && mode === "search" && !q && (
           <EmptyState
-            icon="⌨"
-            title="Search your archive"
-            hint="Type above and press Enter. Separate alternative words with | — e.g.  offer|عرض"
+            icon="Search"
+            title={t("feed.searchPrompt")}
+            hint={t("feed.searchPromptHint")}
           />
         )}
 
@@ -192,7 +211,9 @@ export function Feed() {
                   multi={multi}
                   re={highlight}
                   active={selected?.chat_id === m.chat_id && selected?.msg_id === m.msg_id}
-                  onSelect={(msg) => { select(msg); setRightTab("details"); }}
+                  onSelect={onSelect}
+                  toast={toast}
+                  t={t}
                 />
               </div>,
             );
@@ -201,16 +222,17 @@ export function Feed() {
         })()}
 
         {loading && feed.length > 0 && (
-          <div className="feed-loading"><span className="spinner" /> loading older messages…</div>
+          <div className="feed-loading">
+            <span className="spinner" /> {t("feed.loadingOlder")}
+          </div>
         )}
         {mode === "browse" && hasMore && !loading && (
           <div className="feed-more">
             {feed.length < 3000 ? (
-              <button className="btn ghost sm" onClick={() => void loadFeed(false)}>Load older messages</button>
+              <button className="btn ghost sm" onClick={() => void loadFeed(false)}>{t("feed.loadOlder")}</button>
             ) : (
               <span className="fb-more">
-                Showing the newest {feed.length.toLocaleString()} messages —
-                narrow the filters to explore deeper history
+                {t("feed.showingNewest", { n: feed.length.toLocaleString() })}
               </span>
             )}
           </div>
@@ -222,6 +244,7 @@ export function Feed() {
 }
 
 function JumpTop() {
+  const { t } = useLang();
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const feed = ref.current?.parentElement?.querySelector(".feed");
@@ -237,13 +260,13 @@ function JumpTop() {
     <button
       ref={ref}
       className="jump-top"
-      title="Jump to latest"
+      title={t("feed.jumpLatest")}
       onClick={() => {
         const feed = ref.current?.parentElement?.querySelector(".feed");
         if (feed) feed.scrollTo({ top: 0, behavior: "smooth" });
       }}
     >
-      ↑
+      <Ic.ArrowDownToLine size={17} />
     </button>
   );
 }

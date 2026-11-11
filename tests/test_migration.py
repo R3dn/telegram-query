@@ -1,132 +1,246 @@
-"""Migration tests: v2 -> v3 upgrade, idempotency, data preservation."""
+"""Tests for migration.py - the desktop packaging data-migration contract.
+
+These tests enforce the safety rules that the release depends on:
+never overwrite, copy-not-move, idempotency, lock handling, and the
+empty-archive-only import path.
+"""
+import json
+import os
 import sqlite3
+import time
+from pathlib import Path
+
+import pytest
 
 import config
 import db
+import migration
 
-# The v0.3 schema (for building a genuine pre-upgrade database)
-V2_SCHEMA = """
-CREATE TABLE chats (
-    chat_id     INTEGER PRIMARY KEY,
-    title       TEXT NOT NULL,
-    username    TEXT,
-    kind        TEXT NOT NULL DEFAULT 'group',
-    last_msg_id INTEGER NOT NULL DEFAULT 0,
-    last_synced TEXT,
-    tracked     INTEGER NOT NULL DEFAULT 1,
-    backfill_floor INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE messages (
-    chat_id     INTEGER NOT NULL,
-    msg_id      INTEGER NOT NULL,
-    date        TEXT NOT NULL,
-    sender_id   INTEGER,
-    sender_name TEXT,
-    text        TEXT NOT NULL DEFAULT '',
-    text_norm   TEXT NOT NULL DEFAULT '',
-    has_media   INTEGER NOT NULL DEFAULT 0,
-    edited      INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (chat_id, msg_id)
-);
-CREATE VIRTUAL TABLE messages_fts USING fts5(
-    text_norm, content='messages', content_rowid='rowid', tokenize='trigram'
-);
-CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-INSERT INTO schema_meta VALUES ('version', '2');
-"""
+# ---------------------------------------------------------------------------
+# Helpers: build small realistic archives
+# ---------------------------------------------------------------------------
+
+def make_archive(path: Path, messages: int = 3, env: str | None = None,
+                 with_session: bool = True) -> Path:
+    """A real Telegram Query archive at <path>/ (db + session + .env)."""
+    path.mkdir(parents=True, exist_ok=True)
+    conn = db.get_db(str(path / migration.DB_NAME))
+    try:
+        db.upsert_chat(conn, -100123, "Test Group", "testgroup", "group")
+        for i in range(messages):
+            db.upsert_message(conn, -100123, 1000 + i,
+                              f"2026-11-0{i + 1}T10:00:00+00:00",
+                              5, "tester",
+                              f"hello world {i} عرض")
+        conn.commit()
+    finally:
+        conn.close()
+    if with_session:
+        (path / migration.SESSION_NAME).write_bytes(b"fake-session-data")
+    if env is not None:
+        (path / ".env").write_text(env, encoding="utf-8")
+    return path
 
 
-def make_v2_db(path):
-    conn = sqlite3.connect(path)
-    conn.executescript(V2_SCHEMA)
-    conn.execute("INSERT INTO chats VALUES (-1, 'Old', NULL, 'group', 5, "
-                 "'2026-01-01', 1, 0)")
-    conn.execute("INSERT INTO messages VALUES (-1, 1, '2026-01-01T10:00:00',"
-                 " 7, 'u', 'مبروووك', 'مبروووك', 0, 0)")
+def count_messages(db_path: Path) -> int:
+    conn = sqlite3.connect(db_path)
+    try:
+        return conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    finally:
+        conn.close()
+
+
+@pytest.fixture()
+def source(tmp_path):
+    return make_archive(tmp_path / "source", messages=3)
+
+
+@pytest.fixture()
+def target(tmp_path):
+    return tmp_path / "target"
+
+
+# ---------------------------------------------------------------------------
+# Core migration
+# ---------------------------------------------------------------------------
+
+def test_migrate_copies_db_session_and_env(source, target):
+    env = ("TG_API_ID=111\nTG_API_HASH=xyz\n"
+           "TG_DB_PATH=/old/absolute/path.db\nHOST=0.0.0.0\nPORT=9999\n")
+    (source / ".env").write_text(env, encoding="utf-8")
+    entry = migration.migrate_data(source, target)
+    assert entry["status"] == "ok"
+    assert count_messages(target / migration.DB_NAME) == 3
+    assert (target / migration.SESSION_NAME).read_bytes() == b"fake-session-data"
+    # the .env is copied but path-relocation and bind keys are dropped:
+    # the migrated install resolves to the canonical data dir and stays
+    # loopback. Credentials survive.
+    text = (target / ".env").read_text(encoding="utf-8")
+    assert "TG_API_ID=111" in text and "TG_API_HASH=xyz" in text
+    assert "TG_DB_PATH" not in text and "HOST" not in text
+    assert "PORT" not in text
+    # the source is a backup - copy, never move
+    assert (source / migration.DB_NAME).exists()
+    assert (source / migration.SESSION_NAME).exists()
+    # report recorded
+    report = json.loads((target / "migration-report.json").read_text())
+    assert report[0]["source"].endswith("source")
+
+
+def test_migrate_is_a_copy_never_a_move(source, target):
+    before = (source / migration.DB_NAME).stat().st_size
+    migration.migrate_data(source, target)
+    assert (source / migration.DB_NAME).stat().st_size == before
+
+
+def test_migrate_never_overwrites_existing_database(source, target):
+    make_archive(target, messages=7, with_session=False)
+    with pytest.raises(migration.MigrationError, match="already contains"):
+        migration.migrate_data(source, target)
+    # nothing was touched on either side
+    assert count_messages(target / migration.DB_NAME) == 7
+    assert count_messages(source / migration.DB_NAME) == 3
+
+
+def test_migrate_is_idempotent(source, target):
+    migration.migrate_data(source, target)
+    with pytest.raises(migration.MigrationError, match="already contains"):
+        migration.migrate_data(source, target)
+    assert count_messages(target / migration.DB_NAME) == 3
+
+
+def test_migrate_wal_source_is_snapshotted_consistently(source, target):
+    # a live source in WAL mode with un-checkpointed data
+    conn = sqlite3.connect(source / migration.DB_NAME)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("INSERT INTO messages (chat_id, msg_id, date, sender_id, "
+                 "sender_name, text, text_norm, has_media, edited) VALUES "
+                 "(-100123, 5, '2026-11-05T12:00:00+00:00', 1, 'w', "
+                 "'wal row', 'wal row', 0, 0)")
     conn.commit()
     conn.close()
+    migration.migrate_data(source, target)
+    assert count_messages(target / migration.DB_NAME) == 4
 
 
-def test_upgrade_from_v2_preserves_data_and_flags_reindex(tmp_path):
-    path = str(tmp_path / "old.db")
-    make_v2_db(path)
-
-    db.init_db(path)   # runs SCHEMA + _migrate on the existing DB
-    conn = db.get_db(path)
-    try:
-        # version bumped, data intact
-        v = conn.execute("SELECT value FROM schema_meta WHERE key='version'"
-                         ).fetchone()["value"]
-        assert v == str(db.SCHEMA_VERSION)
-        msg = conn.execute("SELECT text FROM messages").fetchone()
-        assert msg["text"] == "مبروووك"
-        # v4: reply_to captured going forward
-        cols = [r["name"] for r in conn.execute("PRAGMA table_info(messages)")]
-        assert "reply_to" in cols
-        # new tables exist
-        for t in ("app_settings", "saved_searches", "bookmarks",
-                  "deals", "briefs", "brief_versions", "ai_task_cache",
-                  "ai_usage", "watchlists", "alerts", "digest_schedules",
-                  "digests", "faq_clusters", "term_daily", "entities",
-                  "entity_mentions", "open_questions"):
-            conn.execute(f"SELECT 1 FROM {t}").fetchone()
-        # reindex flagged (extended normalization + existing messages)
-        if config.settings.normalization_level == "extended":
-            assert db.get_setting(conn, "needs_reindex") == "1"
-        # v6: per-model usage recording + discovery backfill for
-        # archives that already have messages (visible job on next start)
-        cols = [r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")]
-        assert "model" in cols
-        assert db.get_setting(conn, "needs_discover_backfill") == "1"
-    finally:
-        conn.close()
+def test_migrate_missing_db_is_a_clear_error(tmp_path, target):
+    (tmp_path / "source").mkdir()
+    with pytest.raises(migration.MigrationError, match="No messages.db"):
+        migration.migrate_data(tmp_path / "source", target)
 
 
-def test_migration_is_idempotent(tmp_path):
-    path = str(tmp_path / "old.db")
-    make_v2_db(path)
-    db.init_db(path)
-    conn = db.get_db(path)
-    try:
-        db._migrate(conn)   # re-running must be a safe no-op
-        conn.commit()
-        v = conn.execute("SELECT value FROM schema_meta WHERE key='version'"
-                         ).fetchone()["value"]
-        assert v == str(db.SCHEMA_VERSION)
-        assert conn.execute("SELECT COUNT(*) c FROM messages"
-                            ).fetchone()["c"] == 1
-    finally:
-        conn.close()
+def test_migrate_rejects_non_archive(tmp_path, target):
+    src = tmp_path / "source"
+    src.mkdir()
+    (src / migration.DB_NAME).write_bytes(b"not a database at all")
+    with pytest.raises(migration.MigrationError,
+                       match="not a Telegram Query archive"):
+        migration.migrate_data(src, target)
 
 
-def test_fresh_db_needs_no_reindex(tmp_path):
-    path = str(tmp_path / "fresh.db")
-    db.init_db(path)
-    conn = db.get_db(path)
-    try:
-        assert db.get_setting(conn, "needs_reindex") is None
-        # no existing messages -> no discovery backfill needed either
-        assert db.get_setting(conn, "needs_discover_backfill") is None
-        v = conn.execute("SELECT value FROM schema_meta WHERE key='version'"
-                         ).fetchone()["value"]
-        assert v == str(db.SCHEMA_VERSION)
-        cols = [r["name"] for r in conn.execute("PRAGMA table_info(messages)")]
-        assert "reply_to" in cols
-        cols = [r["name"] for r in conn.execute("PRAGMA table_info(ai_usage)")]
-        assert "model" in cols
-    finally:
-        conn.close()
+# ---------------------------------------------------------------------------
+# Locking
+# ---------------------------------------------------------------------------
+
+def test_active_lock_blocks_migration(source, target):
+    target.mkdir(parents=True)
+    lock = target / ".migration.lock"
+    lock.write_text("pid=1\n")
+    with pytest.raises(migration.MigrationError, match="Another migration"):
+        migration.migrate_data(source, target)
+    # nothing was copied
+    assert not (target / migration.DB_NAME).exists()
 
 
-def test_bookmark_fk_blocks_orphans(conn):
-    """Bookmarks reference the original message: a nonexistent message is
-    rejected by the FK (and real message deletions cascade)."""
-    db.upsert_chat(conn, -3, "G", None, "group")
-    db.upsert_message(conn, -3, 1, "2026-01-01T10:00:00+00:00", 1, "s", "hi")
-    conn.commit()
-    conn.execute("INSERT INTO bookmarks VALUES (-3, 1, 'note', 't', 't')")
-    conn.commit()
-    # cascading delete removes the bookmark with the message
-    conn.execute("DELETE FROM messages WHERE chat_id=-3")
-    left = conn.execute("SELECT COUNT(*) c FROM bookmarks").fetchone()["c"]
-    assert left == 0
+def test_stale_lock_is_taken_over(source, target):
+    target.mkdir(parents=True)
+    lock = target / ".migration.lock"
+    lock.write_text("pid=1\n")
+    old = time.time() - migration._LOCK_STALE_SECONDS - 60
+    os.utime(lock, (old, old))
+    migration.migrate_data(source, target)
+    assert (target / migration.DB_NAME).exists()
+    assert not lock.exists()       # released on success
+
+
+# ---------------------------------------------------------------------------
+# The in-app import path (replace_empty)
+# ---------------------------------------------------------------------------
+
+def test_import_replaces_only_an_empty_archive(source, target):
+    make_archive(target, messages=0, with_session=False)   # fresh install
+    entry = migration.migrate_data(source, target, replace_empty=True,
+                                   env_target=target / ".env")
+    assert entry["status"] == "ok"
+    assert count_messages(target / migration.DB_NAME) == 3
+    # the replaced empty db was backed up first
+    backups = list((target / "backups").glob("pre-import-*/"))
+    assert len(backups) == 1
+    assert (backups[0] / migration.DB_NAME).exists()
+
+
+def test_import_refuses_a_used_archive(source, target):
+    make_archive(target, messages=5, with_session=False)
+    with pytest.raises(migration.MigrationError, match="not empty"):
+        migration.migrate_data(source, target, replace_empty=True)
+    assert count_messages(target / migration.DB_NAME) == 5
+
+
+def test_import_refuses_when_a_session_exists(source, target):
+    target.mkdir(parents=True)
+    (target / migration.SESSION_NAME).write_bytes(b"existing session")
+    with pytest.raises(migration.MigrationError, match="not empty"):
+        migration.migrate_data(source, target, replace_empty=True)
+    assert (target / migration.SESSION_NAME).read_bytes() == b"existing session"
+
+
+def test_archive_is_empty_detection(tmp_path):
+    d = tmp_path / "d"
+    d.mkdir()
+
+    def is_empty(data: Path) -> bool:
+        return migration.archive_is_empty(
+            data / migration.DB_NAME,
+            config.session_file(data / migration.SESSION_NAME))
+
+    assert is_empty(d) is True                 # no db at all
+    make_archive(d, messages=0, with_session=False)
+    assert is_empty(d) is True                 # zero messages
+    make_archive(d, messages=1, with_session=False)
+    assert is_empty(d) is False
+    d2 = tmp_path / "d2"
+    make_archive(d2, messages=0, with_session=True)
+    assert is_empty(d2) is False               # a session counts
+
+
+# ---------------------------------------------------------------------------
+# Auto-migration (startup path)
+# ---------------------------------------------------------------------------
+
+def test_auto_migrate_is_a_noop_in_source_runs(source, tmp_path,
+                                               monkeypatch):
+    monkeypatch.setattr(config, "IS_FROZEN", False)
+    assert migration.auto_migrate() is None
+
+
+def test_auto_migrate_finds_legacy_archive_beside_exe(source, target,
+                                                      monkeypatch):
+    monkeypatch.setattr(config, "IS_FROZEN", True)
+    monkeypatch.setattr(config, "DATA_DIR", target)
+    monkeypatch.setattr(config, "INSTALL_DIR", source)
+    for env_name in ("TG_DATA_DIR", "TG_DB_PATH", "TG_SESSION_PATH"):
+        monkeypatch.delenv(env_name, raising=False)
+    assert (target / migration.DB_NAME).exists() is False
+    entry = migration.auto_migrate()
+    assert entry is not None and entry["status"] == "ok"
+    assert count_messages(target / migration.DB_NAME) == 3
+
+
+def test_auto_migrate_respects_explicit_overrides(source, target,
+                                                  monkeypatch):
+    monkeypatch.setattr(config, "IS_FROZEN", True)
+    monkeypatch.setattr(config, "DATA_DIR", target)
+    monkeypatch.setattr(config, "INSTALL_DIR", source)
+    monkeypatch.setenv("TG_DATA_DIR", str(target))
+    assert migration.auto_migrate() is None
+    assert not (target / migration.DB_NAME).exists()

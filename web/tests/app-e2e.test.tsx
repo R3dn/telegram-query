@@ -140,12 +140,15 @@ vi.mock("../src/api/client", () => ({ api: mocks }));
 
 import App from "../src/App";
 import { StoreProvider } from "../src/state/store";
+import { LangProvider } from "../src/i18n";
 
 function renderApp() {
   return render(
-    <StoreProvider>
+    <LangProvider>
+      <StoreProvider>
       <App />
-    </StoreProvider>,
+      </StoreProvider>
+    </LangProvider>,
   );
 }
 
@@ -191,7 +194,7 @@ describe("full app: every workspace", () => {
     expect(await screen.findByText(/great trail/)).toBeTruthy();
     expect(screen.getByText("Export .md")).toBeTruthy();
     expect(screen.getByText("Export .json")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Telegram ↗/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Telegram/ })).toBeTruthy();
   });
 
   it("navigates to Deals and shows extracted rows with status", async () => {
@@ -203,7 +206,7 @@ describe("full app: every workspace", () => {
     // expand the card: sources + human actions appear
     fireEvent.click(screen.getByText("Trail shoes 20% off"));
     expect(await screen.findByText(/Sources \(1\)/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /✓ Confirm/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeTruthy();
     expect(mocks.deals).toHaveBeenCalled();
   });
 
@@ -224,7 +227,7 @@ describe("full app: every workspace", () => {
     expect(await screen.findByText("2")).toBeTruthy();
     await open(/Watchlists/);
     expect(await screen.findByText("e2e trails")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "+ New watchlist" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New watchlist" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Check now" })).toBeTruthy();
 
     await open(/Alerts/);

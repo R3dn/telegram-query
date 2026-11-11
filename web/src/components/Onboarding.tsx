@@ -4,21 +4,36 @@
 import { useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
+import { useLang } from "../i18n";
 import type { Dialog } from "../api/types";
+import { jobKey } from "../utils/format";
+import { Ic } from "../design/icons";
 import { AiProviderForm, CredsForm } from "./SetupForms";
 
 type Step = "credentials" | "login" | "groups" | "ai" | "sync" | "done";
 
-const STEPS: { key: Step; title: string }[] = [
-  { key: "credentials", title: "Telegram API credentials" },
-  { key: "login", title: "Log in to Telegram" },
-  { key: "groups", title: "Choose groups to track" },
-  { key: "ai", title: "AI provider (optional)" },
-  { key: "sync", title: "First sync" },
+const STEPS: { key: Step; label: string }[] = [
+  { key: "credentials", label: "onboarding.step.credentials" },
+  { key: "login", label: "onboarding.step.login" },
+  { key: "groups", label: "onboarding.step.groups" },
+  { key: "ai", label: "onboarding.step.ai" },
+  { key: "sync", label: "onboarding.step.sync" },
 ];
+
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+/** Localized count noun: Arabic picks .one/.two/.few/.many plural classes,
+ *  English .one/.many. `base` is a "system.pl.*" key prefix. */
+function nounT(t: TFn, lang: string, base: string, n: number): string {
+  const sfx = lang === "ar"
+    ? n === 1 ? "one" : n === 2 ? "two" : n <= 10 ? "few" : "many"
+    : n === 1 ? "one" : "many";
+  return t(`${base}.${sfx}`, { n });
+}
 
 export function Onboarding({ onClose }: { onClose: () => void }) {
   const { appState, refreshAppState, refreshGroups, toast, loadFeed } = useStore();
+  const { t, lang } = useLang();
   const [step, setStep] = useState<Step>(
     !appState?.telegram_configured ? "credentials"
       : appState?.authenticated === false ? "login"
@@ -46,41 +61,46 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
               <rect width="24" height="24" rx="6" fill="var(--accent)" />
               <path d="M6 11.5 18 6l-4.5 12-2.6-4.1L6 11.5z" fill="#fff" />
             </svg>
-            <span>Welcome to Telegram Query</span>
+            <span>{t("onboarding.welcome", { app: t("app.name") })}</span>
           </div>
-          <button className="btn ghost sm" onClick={onClose} title="Close - you can reopen from the sidebar">✕</button>
+          <button className="btn ghost sm" onClick={onClose} title={t("onboarding.closeHint")}>
+            <Ic.Close size={14} />
+          </button>
         </div>
 
         <div className="wizard-steps">
           {STEPS.map((s, i) => (
             <span key={s.key} className={`wstep ${i === idx ? "on" : i < idx ? "done" : ""}`}>
-              <b>{i + 1}</b> {s.title}
+              <b>{i < idx ? <Ic.Check size={11} /> : i + 1}</b> {t(s.label)}
             </span>
           ))}
         </div>
 
         <div className="wizard-body">
           {step === "credentials" && (
-            <CredentialsStep busy={busy} setBusy={setBusy} onDone={next} />
+            <CredentialsStep busy={busy} setBusy={setBusy} onDone={next} t={t} />
           )}
           {step === "login" && (
-            <LoginStep busy={busy} setBusy={setBusy} onDone={next} />
+            <LoginStep busy={busy} setBusy={setBusy} onDone={next} t={t} />
           )}
-          {step === "groups" && <GroupsStep onDone={next} />}
-          {step === "ai" && <AiStep onDone={next} />}
+          {step === "groups" && <GroupsStep onDone={next} t={t} lang={lang} />}
+          {step === "ai" && <AiStep onDone={next} t={t} />}
           {step === "sync" && (
             <SyncStep onDone={async () => {
               await refreshGroups();
               await refreshAppState();
               void loadFeed(true);
-              toast("Setup complete — your archive is building", "good");
+              toast(t("onboarding.setupComplete"), "good");
               onClose();
-            }} />
+            }} t={t} />
           )}
           {step === "done" && (
             <div className="wizard-done">
-              <p>Everything is set up. You can close this wizard.</p>
-              <button className="btn primary" onClick={onClose}>Start using Telegram Query</button>
+              <Ic.CircleCheck size={30} />
+              <p>{t("onboarding.allSet")}</p>
+              <button className="btn primary" onClick={onClose}>
+                {t("onboarding.startUsing", { app: t("app.name") })}
+              </button>
             </div>
           )}
         </div>
@@ -91,8 +111,8 @@ export function Onboarding({ onClose }: { onClose: () => void }) {
 
 /* ---------------- steps ---------------- */
 
-function CredentialsStep({ busy, setBusy, onDone }: {
-  busy: boolean; setBusy: (b: boolean) => void; onDone: () => void;
+function CredentialsStep({ busy, setBusy, onDone, t }: {
+  busy: boolean; setBusy: (b: boolean) => void; onDone: () => void; t: TFn;
 }) {
   const { refreshAppState, appState } = useStore();
   const [editing, setEditing] = useState(false);
@@ -100,54 +120,62 @@ function CredentialsStep({ busy, setBusy, onDone }: {
 
   return (
     <div>
-      <h3>Connect your Telegram account</h3>
-      <p className="dim">
-        Telegram requires every third-party app to use its own API credentials —
-        creating them takes about a minute:
-      </p>
+      <h3>{t("onboarding.creds.title")}</h3>
+      <p className="dim">{t("onboarding.creds.intro")}</p>
       <ol className="wizard-list">
-        <li>Open <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a> → <b>API development tools</b></li>
-        <li>Create an app (any title; the rest can stay default)</li>
-        <li>Copy <b>api_id</b> and <b>api_hash</b> and paste them below</li>
+        <li>
+          {t("onboarding.creds.step1.open")}{" "}
+          <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a>{" "}
+          <Ic.ArrowRight size={11} className="li-arrow" />{" "}
+          <b>{t("onboarding.creds.step1.tools")}</b>
+        </li>
+        <li>{t("onboarding.creds.step2")}</li>
+        <li>
+          {t("onboarding.creds.step3.copy")} <code className="kbd">api_id</code>{" "}
+          {t("onboarding.creds.step3.and")} <code className="kbd">api_hash</code>{" "}
+          {t("onboarding.creds.step3.paste")}
+        </li>
       </ol>
 
       {configured && !editing && (
         <div className="settings-row">
-          <span>API credentials</span>
+          <span>{t("system.apiCredentials")}</span>
           <span>
-            <span className="badge good">configured ✓</span>{" "}
-            <button className="link" onClick={() => setEditing(true)}>change</button>
+            <span className="badge good"><Ic.Check size={11} /> {t("system.configured")}</span>{" "}
+            <button className="link" onClick={() => setEditing(true)}>{t("system.change")}</button>
           </span>
         </div>
       )}
       {(!configured || editing) && (
-        <CredsForm onSaved={() => void onDone()} />
+        <CredsForm t={t} onSaved={() => void onDone()} />
       )}
       {configured && !editing && (
         <div className="wizard-actions" style={{ justifyContent: "flex-end" }}>
-          <button className="btn primary" onClick={() => void onDone()}>Continue →</button>
+          <button className="btn primary" onClick={() => void onDone()}>
+            {t("onboarding.continue")} <Ic.ArrowRight size={13} />
+          </button>
         </div>
       )}
       {configured && !editing && (
         <p className="mm-note dim">
-          Values are stored in your local <code className="kbd">.env</code> file.
-          Prefer editing files? Everything is documented in
+          {t("onboarding.creds.envNote.a")} <code className="kbd">.env</code>{" "}
+          {t("onboarding.creds.envNote.b")}{" "}
           <code className="kbd" style={{ marginInline: 4 }}>.env.example</code>.
         </p>
       )}
-      {busy && <p className="mm-note dim">Checking…</p>}
+      {busy && <p className="mm-note dim">{t("onboarding.checking")}</p>}
       <button
         className="link" style={{ marginTop: 6, display: "block" }}
         onClick={async () => { setBusy(true); await refreshAppState(); setBusy(false); }}
       >
-        I edited .env manually — check again
+        {t("onboarding.recheckEnv")}
       </button>
     </div>
   );
 }
 
-function LoginStep({ busy, setBusy, onDone }: {
-  busy: boolean; setBusy: (b: boolean) => void; onDone: () => void;
+function LoginStep({ busy, setBusy, onDone, t }: {
+  busy: boolean; setBusy: (b: boolean) => void; onDone: () => void; t: TFn;
 }) {
   const { appState, refreshAppState, toast } = useStore();
   const [stage, setStage] = useState<"phone" | "code" | "password">("phone");
@@ -166,7 +194,7 @@ function LoginStep({ busy, setBusy, onDone }: {
       else if (r.stage === "password") setStage("password");
       else {
         await refreshAppState();
-        toast(`Logged in as ${appState?.auth_user ?? ""}`, "good");
+        toast(t("onboarding.login.loggedInAs", { user: appState?.auth_user ?? "" }), "good");
         onDone();
       }
     } catch (e) {
@@ -178,48 +206,56 @@ function LoginStep({ busy, setBusy, onDone }: {
 
   return (
     <div>
-      <h3>Log in to Telegram</h3>
+      <h3>{t("onboarding.step.login")}</h3>
       {stage === "phone" && (
         <>
-          <label className="field"><span>Phone number (international)</span>
-            <input className="input" placeholder="+966501234567" value={phone}
+          <label className="field"><span>{t("onboarding.login.phone")}</span>
+            <input className="input" placeholder="+966501234567" value={phone} dir="ltr"
               onChange={(e) => setPhone(e.target.value)} />
           </label>
           <div className="wizard-actions">
             <button className="btn primary" disabled={busy || !phone.trim()}
               onClick={() => void run(() => api.authStart(phone))}>
-              {busy ? "Sending code…" : "Send login code"}
+              {busy
+                ? <><Ic.Spin size={13} className="spin" /> {t("onboarding.login.sending")}</>
+                : t("onboarding.login.send")}
             </button>
           </div>
         </>
       )}
       {stage === "code" && (
         <>
-          <p className="dim">Telegram sent a login code to your app/SMS. Enter it below.</p>
-          <label className="field"><span>Login code</span>
-            <input className="input" placeholder="12345" value={code} inputMode="numeric"
+          <p className="dim">{t("onboarding.login.codeSent")}</p>
+          <label className="field"><span>{t("onboarding.login.code")}</span>
+            <input className="input" placeholder="12345" value={code} inputMode="numeric" dir="ltr"
               onChange={(e) => setCode(e.target.value)} />
           </label>
           <div className="wizard-actions">
             <button className="btn primary" disabled={busy || !code.trim()}
               onClick={() => void run(() => api.authCode(code))}>
-              {busy ? "Verifying…" : "Verify"}
+              {busy
+                ? <><Ic.Spin size={13} className="spin" /> {t("onboarding.login.verifying")}</>
+                : t("onboarding.login.verify")}
             </button>
-            <button className="btn ghost" disabled={busy} onClick={() => void run(() => api.authStart(phone))}>Resend</button>
+            <button className="btn ghost" disabled={busy} onClick={() => void run(() => api.authStart(phone))}>
+              {t("onboarding.login.resend")}
+            </button>
           </div>
         </>
       )}
       {stage === "password" && (
         <>
-          <p className="dim">Your account has two-step verification enabled. Enter your cloud password.</p>
-          <label className="field"><span>Two-step verification password</span>
+          <p className="dim">{t("onboarding.login.2faIntro")}</p>
+          <label className="field"><span>{t("onboarding.login.2faPassword")}</span>
             <input className="input" type="password" value={password}
               onChange={(e) => setPassword(e.target.value)} />
           </label>
           <div className="wizard-actions">
             <button className="btn primary" disabled={busy || !password}
               onClick={() => void run(() => api.authPassword(password))}>
-              {busy ? "Verifying…" : "Verify"}
+              {busy
+                ? <><Ic.Spin size={13} className="spin" /> {t("onboarding.login.verifying")}</>
+                : t("onboarding.login.verify")}
             </button>
           </div>
         </>
@@ -229,7 +265,9 @@ function LoginStep({ busy, setBusy, onDone }: {
   );
 }
 
-function GroupsStep({ onDone }: { onDone: () => void }) {
+function GroupsStep({ onDone, t, lang }: {
+  onDone: () => void; t: TFn; lang: string;
+}) {
   const { toast, refreshGroups, refreshAppState, refreshJobs } = useStore();
   const [dialogs, setDialogs] = useState<Dialog[] | null>(null);
   const [checked, setChecked] = useState<Set<number>>(new Set());
@@ -249,7 +287,7 @@ function GroupsStep({ onDone }: { onDone: () => void }) {
         const r = await api.dialogsGet();
         if (r.ready && r.dialogs) { setDialogs(r.dialogs); setBusy(false); return; }
       }
-      throw new Error("Timed out loading the group list");
+      throw new Error(t("onboarding.groups.loadTimeout"));
     } catch (e) {
       toast((e as Error).message, "err");
       setBusy(false);
@@ -258,16 +296,18 @@ function GroupsStep({ onDone }: { onDone: () => void }) {
 
   const track = async () => {
     const ids = [...checked];
-    if (!ids.length) { toast("Tick at least one group", "info"); return; }
+    if (!ids.length) { toast(t("onboarding.groups.pickAtLeastOne"), "info"); return; }
     setBusy(true);
     try {
       const r = await api.track(ids);
       if (r.started) {
-        toast(`Tracking ${ids.length} group${ids.length > 1 ? "s" : ""} — backfill starting`, "good");
+        toast(t("system.mm.trackedBackfill", {
+          groups: nounT(t, lang, "system.pl.group", ids.length),
+        }), "good");
         await Promise.all([refreshGroups(), refreshAppState(), refreshJobs()]);
         onDone();
       } else {
-        toast(r.reason === "already_tracked" ? "Already tracking those groups" : "Could not start tracking", "info");
+        toast(r.reason === "already_tracked" ? t("system.alreadyTracking") : t("system.trackFailed"), "info");
       }
     } catch (e) {
       toast((e as Error).message, "err");
@@ -278,17 +318,15 @@ function GroupsStep({ onDone }: { onDone: () => void }) {
 
   return (
     <div>
-      <h3>Choose groups to track</h3>
+      <h3>{t("onboarding.step.groups")}</h3>
       <p className="dim">
-        Tracked groups are copied into your local archive — their full history
-        is downloaded so you can search and browse them. You can change this
-        anytime in “Manage groups”.
+        {t("onboarding.groups.intro", { manage: t("groups.manage") })}
       </p>
       {dialogs === null && (
         <div className="wizard-actions" style={{ justifyContent: "center", padding: 24 }}>
           {busy
-            ? <><span className="spinner" /> listing your groups…</>
-            : <button className="btn primary" onClick={() => void load(false)}>Load my groups</button>}
+            ? <><Ic.Spin size={13} className="spin" /> {t("onboarding.groups.listing")}</>
+            : <button className="btn primary" onClick={() => void load(false)}>{t("onboarding.groups.load")}</button>}
         </div>
       )}
       {dialogs && (
@@ -302,7 +340,9 @@ function GroupsStep({ onDone }: { onDone: () => void }) {
                     if (n.has(d.chat_id)) n.delete(d.chat_id); else n.add(d.chat_id);
                     return n;
                   })} />
-                <span className="g-ic">{d.kind === "channel" ? "📣" : "👥"}</span>
+                <span className="g-ic">
+                  {d.kind === "channel" ? <Ic.Radio size={14} /> : <Ic.Users size={14} />}
+                </span>
                 <span className="g-main">
                   <span className="g-title" dir="auto">{d.title}</span>
                   <span className="g-meta">{d.username ? `@${d.username}` : d.chat_id}</span>
@@ -311,12 +351,15 @@ function GroupsStep({ onDone }: { onDone: () => void }) {
             ))}
           </div>
           <div className="wizard-actions">
-            <button className="btn ghost sm" onClick={() => void load(true)} disabled={busy}>↻ reload list</button>
+            <button className="btn ghost sm" onClick={() => void load(true)} disabled={busy}>
+              <Ic.RotateCcw size={13} /> {t("onboarding.groups.reload")}
+            </button>
             <span style={{ flex: 1 }} />
             <button className="btn primary" disabled={busy || checked.size === 0} onClick={() => void track()}>
-              Track {checked.size > 0 ? `${checked.size} group${checked.size > 1 ? "s" : ""}` : ""}
+              {t("onboarding.groups.track")}
+              {checked.size > 0 ? ` ${nounT(t, lang, "system.pl.group", checked.size)}` : ""}
             </button>
-            <button className="btn ghost" onClick={onDone}>Skip for now</button>
+            <button className="btn ghost" onClick={onDone}>{t("onboarding.skip")}</button>
           </div>
         </>
       )}
@@ -324,88 +367,85 @@ function GroupsStep({ onDone }: { onDone: () => void }) {
   );
 }
 
-function AiStep({ onDone }: { onDone: () => void }) {
+function AiStep({ onDone, t }: { onDone: () => void; t: TFn }) {
   const { appState, refreshAppState } = useStore();
   const [editing, setEditing] = useState(false);
   const configured = appState?.ai_configured === true;
 
   return (
     <div>
-      <h3>AI provider <span className="badge">optional</span></h3>
-      <p className="dim">
-        Ask-AI answers questions about your archive using any
-        OpenAI-compatible endpoint (OpenAI, Groq, OpenRouter, Ollama, LM
-        Studio, vLLM…). You can verify the connection before saving.
-      </p>
+      <h3>
+        {t("system.section.ai")} <span className="badge">{t("onboarding.ai.optional")}</span>
+      </h3>
+      <p className="dim">{t("onboarding.ai.intro")}</p>
 
       {configured && !editing ? (
         <>
           <div className="settings-row">
-            <span>Provider</span>
+            <span>{t("system.provider")}</span>
             <span>
-              <span className="badge good">{appState?.ai_provider_host} · {appState?.ai_model}</span>{" "}
-              <button className="link" onClick={() => setEditing(true)}>change</button>
+              <span className="badge good" dir="ltr">{appState?.ai_provider_host} · {appState?.ai_model}</span>{" "}
+              <button className="link" onClick={() => setEditing(true)}>{t("system.change")}</button>
             </span>
           </div>
           <div className="wizard-actions" style={{ justifyContent: "flex-end" }}>
-            <button className="btn primary" onClick={() => void onDone()}>Continue →</button>
+            <button className="btn primary" onClick={() => void onDone()}>
+              {t("onboarding.continue")} <Ic.ArrowRight size={13} />
+            </button>
           </div>
         </>
       ) : (
-        <AiProviderForm onSaved={() => void onDone()} />
+        <AiProviderForm t={t} onSaved={() => void onDone()} />
       )}
 
       <div className="wizard-actions" style={{ justifyContent: "space-between" }}>
-        <button className="btn ghost" onClick={() => void onDone()}>Skip for now</button>
+        <button className="btn ghost" onClick={() => void onDone()}>{t("onboarding.skip")}</button>
         {configured && !editing && (
-          <button className="link" onClick={() => void refreshAppState()}>re-check</button>
+          <button className="link" onClick={() => void refreshAppState()}>{t("onboarding.ai.recheck")}</button>
         )}
       </div>
-      <p className="mm-note dim">
-        Only retrieved message excerpts are sent to the endpoint when you ask
-        a question — the rest of your archive never leaves this machine.
-      </p>
+      <p className="mm-note dim">{t("onboarding.ai.privacyNote")}</p>
     </div>
   );
 }
 
-function SyncStep({ onDone }: { onDone: () => void }) {
+function SyncStep({ onDone, t }: { onDone: () => void; t: TFn }) {
   const { jobs, refreshJobs } = useStore();
   const [started, setStarted] = useState(false);
   const tail = jobs?.log?.trim().split("\n").slice(-3).join("\n");
 
   return (
     <div>
-      <h3>First sync</h3>
-      <p className="dim">
-        Downloading the history of your tracked groups now. Large groups can
-        take a while — you can keep using the app, stop the sync, and resume
-        anytime without losing progress.
-      </p>
+      <h3>{t("onboarding.step.sync")}</h3>
+      <p className="dim">{t("onboarding.sync.intro")}</p>
       <div className="wizard-actions" style={{ justifyContent: "center", padding: 16 }}>
         {!started ? (
           <button
             className="btn primary"
             onClick={async () => { await api.sync(); await refreshJobs(); setStarted(true); }}
           >
-            Start first sync
+            {t("onboarding.sync.start")}
           </button>
         ) : (
           <div className="mm-progress" style={{ width: "100%" }}>
-            <span className="spinner" />
+            <Ic.Spin size={13} className="spin" />
             <div style={{ flex: 1 }}>
               <div>
                 {jobs?.running
-                  ? `${jobs.name === "track" ? "Backfilling your group" : "Syncing"}…`
+                  ? (jobs.name === "track"
+                    ? t("onboarding.sync.backfilling")
+                    : t("onboarding.sync.syncing"))
                   : jobs?.queued?.length
-                    ? `Queued behind ${jobs.queued.join(", ")}…`
-                    : "Sync queued — starting…"}
+                    ? t("onboarding.sync.queuedBehind", {
+                      jobs: jobs.queued.map((n) => t(jobKey(n))).join(", "),
+                    })
+                    : t("onboarding.sync.queuedStarting")}
               </div>
-              <pre className="mm-log">{tail || "(starting…)"}</pre>
+              <pre className="mm-log">{tail || t("onboarding.sync.starting")}</pre>
               {(jobs?.running || (jobs?.queued?.length ?? 0) > 0) && (
                 <button className="btn danger sm" style={{ marginTop: 8 }}
                   onClick={async () => { await api.jobStop(false); await refreshJobs(); }}>
-                  ■ stop (progress is saved)
+                  <Ic.CircleOff size={13} /> {t("onboarding.sync.stop")}
                 </button>
               )}
             </div>
@@ -413,7 +453,9 @@ function SyncStep({ onDone }: { onDone: () => void }) {
         )}
       </div>
       <div className="wizard-actions" style={{ justifyContent: "flex-end" }}>
-        <button className="btn primary" onClick={() => void onDone()}>Finish setup →</button>
+        <button className="btn primary" onClick={() => void onDone()}>
+          {t("onboarding.sync.finish")} <Ic.ArrowRight size={13} />
+        </button>
       </div>
     </div>
   );

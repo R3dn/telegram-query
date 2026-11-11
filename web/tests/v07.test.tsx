@@ -111,6 +111,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../src/api/client", () => ({ api: mocks }));
 
 import { StoreProvider, useStore } from "../src/state/store";
+import { LangProvider } from "../src/i18n";
 import { DiscoverView } from "../src/components/DiscoverView";
 import { EntityView } from "../src/components/EntityView";
 import { ConversationBlock } from "../src/components/ConversationBlock";
@@ -126,9 +127,11 @@ describe("v0.7 Discover landing view", () => {
     let store: ReturnType<typeof useStore> | null = null;
     const Probe = () => { store = useStore(); return null; };
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <Probe />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
     await waitFor(() => expect(store).toBeTruthy());
     expect(store!.mode).toBe("discover");
@@ -136,10 +139,12 @@ describe("v0.7 Discover landing view", () => {
 
   it("renders all discovery sections from the API", async () => {
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <DiscoverView />
         <Toasts />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
     // trending term + its burst badge
     expect(await screen.findByText("solar inverter")).toBeTruthy();
@@ -156,11 +161,13 @@ describe("v0.7 Discover landing view", () => {
     let store: ReturnType<typeof useStore> | null = null;
     const Probe = () => { store = useStore(); return null; };
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <DiscoverView />
         <Toasts />
         <Probe />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
     const term = await screen.findByRole("button", { name: "solar inverter" });
     fireEvent.click(term);
@@ -170,10 +177,12 @@ describe("v0.7 Discover landing view", () => {
 
   it("loads the AI topic timeline with clickable citations", async () => {
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <DiscoverView />
         <Toasts />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
     fireEvent.click(await screen.findByRole("button", { name: /Timeline/ }));
     await waitFor(() => expect(mocks.topicTimeline).toHaveBeenCalled());
@@ -183,13 +192,15 @@ describe("v0.7 Discover landing view", () => {
 
   it("marking a question answered calls the API and updates the list", async () => {
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <DiscoverView />
         <Toasts />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
     await screen.findByText("What shutter speed for birds?");
-    fireEvent.click(screen.getByRole("button", { name: "✓ answered" }));
+    fireEvent.click(screen.getByRole("button", { name: "answered" }));
     await waitFor(() => expect(mocks.questionSetStatus).toHaveBeenCalledWith(-1, 9, "answered"));
     await waitFor(() => expect(mocks.discoverQuestions).toHaveBeenCalledTimes(2));
   });
@@ -203,10 +214,12 @@ describe("v0.7 Entities view", () => {
 
   it("lists entities and opens a detail with mentions", async () => {
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <EntityView />
         <Toasts />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
     fireEvent.click(await screen.findByText("GadgetHub"));
     await waitFor(() => expect(mocks.entityGet).toHaveBeenCalledWith(1, 30, 0));
@@ -223,14 +236,16 @@ describe("v0.7 conversation block", () => {
 
   it("fetches the conversation on demand and flags the target row", async () => {
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <ConversationBlock m={{
           chat_id: -1, msg_id: 9, date: "2026-11-07T10:00:00+00:00",
           sender_name: "a", text: "q?", has_media: 0, edited: 0,
           chat_title: "Deals", tg_link: null,
         }} />
         <Toasts />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: /View in conversation/ }));
     await waitFor(() => expect(mocks.messageContext).toHaveBeenCalledWith(-1, 9));

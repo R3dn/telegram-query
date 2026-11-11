@@ -1,0 +1,30 @@
+/* Digests workspace. */
+.digest-groups {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-block: 2px 10px; padding-inline: 22px;
+  font-size: var(--fs-small); color: var(--dim);
+}
+.digest-groups .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* toolbar subtitle + new-schedule select */
+.dg-sub { font-size: var(--fs-small); }
+.dg-sched-select { max-width: 190px; }
+
+/* schedules strip + schedule cards */
+.dg-scheds-bar { border-bottom: none; padding-bottom: 0; }
+.dg-sched { margin-block: 6px; margin-inline: 18px; }
+
+/* digest history cards */
+.dg-item { cursor: pointer; transition: border-color var(--dur-1) var(--ease); }
+.dg-item:hover { border-color: var(--border-strong); }
+
+/* open digest detail */
+.dg-brief {
+  margin-block: 8px; margin-inline: 18px;
+  background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--r-l); box-shadow: var(--shadow-1);
+  padding: 14px 16px;
+}
+
+/* scope chips inside the schedule editor */
+.dg-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }

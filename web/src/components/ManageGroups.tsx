@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { Dialog } from "../api/types";
 import { useStore } from "../state/store";
-import { fmtDate, nfmt } from "../utils/format";
+import { useLang } from "../i18n";
+import { fmtDate, jobKey, nfmt } from "../utils/format";
+import { Ic } from "../design/icons";
 import { Modal } from "./Modal";
 
 type Listing =
@@ -12,12 +14,24 @@ type Listing =
   | { state: "waiting"; note: string }
   | { state: "listing" };
 
+type TFn = (key: string, vars?: Record<string, string | number>) => string;
+
+/** Localized count noun: Arabic picks .one/.two/.few/.many plural classes,
+ *  English .one/.many. `base` is a "system.pl.*" key prefix. */
+function nounT(t: TFn, lang: string, base: string, n: number): string {
+  const sfx = lang === "ar"
+    ? n === 1 ? "one" : n === 2 ? "two" : n <= 10 ? "few" : "many"
+    : n === 1 ? "one" : "many";
+  return t(`${base}.${sfx}`, { n });
+}
+
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 export function ManageGroups({ onClose }: { onClose: () => void }) {
   const { groups, refreshGroups, refreshAppState, jobs, refreshJobs, toast, loadFeed } = useStore();
+  const { t, lang } = useLang();
   const [dialogs, setDialogs] = useState<Dialog[] | null>(null);
   const [listing, setListing] = useState<Listing>({ state: "idle" });
   const [checked, setChecked] = useState<Set<number>>(new Set());
@@ -44,14 +58,16 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
           return;
         }
       }
-      setListing({ state: "waiting", note: "Loading your groups from Telegram…" });
+      setListing({ state: "waiting", note: t("system.mm.loadingGroups") });
       let tries = 0;
       while (true) {
         const status = await api.jobStatus();
         if (status.running || status.queued.length > 0) {
           setListing({
             state: "waiting",
-            note: `Waiting for ${status.name || status.queued[0]}… stop it if you need the list now`,
+            note: t("system.mm.waitingJob", {
+              job: t(jobKey(status.name || status.queued[0])),
+            }),
           });
           await sleep(1300);
           continue;
@@ -62,7 +78,7 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
           break;
         }
         if (++tries > 3) {
-          toast("Could not load the group list from Telegram", "err");
+          toast(t("system.mm.loadFailed"), "err");
           break;
         }
         await api.dialogsStart();
@@ -80,20 +96,25 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
   const trackChecked = async () => {
     const ids = [...checked].filter((id) => !trackedIds.has(id));
     if (!ids.length) {
-      toast("Tick the groups you want to track first", "info");
+      toast(t("system.mm.tickFirst"), "info");
       return;
     }
     try {
       const r = await api.track(ids);
       if (r.started === false) {
-        toast(r.reason === "already_tracked" ? "Already tracking those groups" : "Could not start tracking", "info");
+        toast(r.reason === "already_tracked" ? t("system.alreadyTracking") : t("system.trackFailed"), "info");
         return;
       }
       const behind = r.queued_behind?.length ?? 0;
       toast(
         behind > 0
-          ? `Tracking ${ids.length} group${ids.length > 1 ? "s" : ""} — queued behind ${behind} job${behind > 1 ? "s" : ""}`
-          : `Tracking ${ids.length} group${ids.length > 1 ? "s" : ""} — full history backfill starting`,
+          ? t("system.mm.trackedQueued", {
+            groups: nounT(t, lang, "system.pl.group", ids.length),
+            jobs: nounT(t, lang, "system.pl.job", behind),
+          })
+          : t("system.mm.trackedBackfill", {
+            groups: nounT(t, lang, "system.pl.group", ids.length),
+          }),
         "good",
       );
       setChecked(new Set());
@@ -108,8 +129,7 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
     try {
       await api.untrack([id], del);
       toast(
-        del ? "Untracked — messages permanently deleted"
-            : "Untracked — messages kept on disk (re-track to restore)",
+        del ? t("system.mm.untrackedDeleted") : t("system.mm.untrackedKept"),
         del ? "good" : "info",
       );
       await Promise.all([refreshGroups(), refreshAppState()]);
@@ -136,7 +156,7 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
     if (!dialogs) return null;
     const others = dialogs.filter((d) => !trackedIds.has(d.chat_id));
     if (!others.length) {
-      return <p className="mm-note dim">All your Telegram groups are already tracked.</p>;
+      return <p className="mm-note dim">{t("system.mm.allTracked")}</p>;
     }
     return others.map((d) => (
       <label key={d.chat_id} className="mm-row clickable">
@@ -150,7 +170,9 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
             return n;
           })}
         />
-        <span className="g-ic">{d.kind === "channel" ? "📣" : "👥"}</span>
+        <span className="g-ic">
+          {d.kind === "channel" ? <Ic.Radio size={14} /> : <Ic.Users size={14} />}
+        </span>
         <span className="g-main">
           <span className="g-title" dir="auto">{d.title}</span>
           <span className="g-meta">{d.chat_id}{d.username ? ` · @${d.username}` : ""}</span>
@@ -161,63 +183,69 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      title="Manage groups"
+      title={t("groups.manage")}
       wide
       onClose={onClose}
       footer={
         <>
           <button className="btn primary" disabled={busy} onClick={() => void trackChecked()}>
-            Track selected {checked.size > 0 ? `(${checked.size})` : ""}
+            {t("system.mm.trackSelected")}{checked.size > 0 ? ` (${checked.size})` : ""}
           </button>
-          <button className="btn ghost" onClick={refreshDialogs} disabled={busy}>Reload Telegram list</button>
+          <button className="btn ghost" onClick={refreshDialogs} disabled={busy}>
+            <Ic.RefreshCw size={13} /> {t("system.mm.reloadList")}
+          </button>
         </>
       }
     >
-      <div className="label" style={{ marginTop: 6 }}>Tracked groups</div>
-      {groups.length === 0 && <p className="mm-note dim">No groups tracked yet — pick some below.</p>}
+      <div className="label" style={{ marginTop: 6 }}>{t("system.mm.trackedSection")}</div>
+      {groups.length === 0 && <p className="mm-note dim">{t("system.mm.noneTrackedHint")}</p>}
       {groups.map((g) => (
         <div key={g.chat_id} className="mm-row">
-          <span className="g-ic">{g.kind === "channel" ? "📣" : "👥"}</span>
+          <span className="g-ic">
+            {g.kind === "channel" ? <Ic.Radio size={14} /> : <Ic.Users size={14} />}
+          </span>
           <span className="g-main">
             <span className="g-title" dir="auto">{g.title}</span>
             <span className="g-meta">
-              {nfmt(g.message_count)} msgs
-              {g.last_message ? ` · last ${fmtDate(g.last_message)}` : ""}
+              {t("groups.msgs", { n: nfmt(g.message_count) })}
+              {g.last_message ? ` · ${t("system.lastMessage", { date: fmtDate(g.last_message) })}` : ""}
             </span>
           </span>
           <span className="row-actions">
             <button
               className={`btn ghost sm ${armed?.id === g.chat_id && armed.mode === "untrack" ? "armed" : ""}`}
-              title="Stop archiving this group. Messages are kept on disk and reappear if you track it again."
+              title={t("system.mm.untrackTitle")}
               onClick={() => arm(g.chat_id, "untrack")}
             >
               {armed?.id === g.chat_id && armed.mode === "untrack"
-                ? "keeps msgs — sure?" : "✕ untrack"}
+                ? <><Ic.CircleAlert size={13} /> {t("system.mm.untrackArmed")}</>
+                : <><Ic.CircleX size={13} /> {t("system.mm.untrack")}</>}
             </button>
             <button
               className={`btn danger sm ${armed?.id === g.chat_id && armed.mode === "delete" ? "armed" : ""}`}
-              title="Permanently delete this group's messages from the archive."
+              title={t("system.mm.deleteTitle")}
               onClick={() => arm(g.chat_id, "delete")}
             >
               {armed?.id === g.chat_id && armed.mode === "delete"
-                ? `delete ${nfmt(g.message_count)} msgs — sure?` : "🗑 delete"}
+                ? <><Ic.CircleAlert size={13} /> {t("system.mm.deleteArmed", { n: nfmt(g.message_count) })}</>
+                : <><Ic.Trash size={13} /> {t("action.delete")}</>}
             </button>
           </span>
         </div>
       ))}
 
-      <div className="label" style={{ marginTop: 16 }}>Telegram groups not tracked yet</div>
+      <div className="label" style={{ marginTop: 16 }}>{t("system.mm.othersSection")}</div>
 
       {busy && (
         <div className="mm-progress">
-          <span className="spinner" />
+          <Ic.Spin size={13} className="spin" />
           <div>
-            <div>{listing.state === "waiting" ? listing.note : "Fetching your group list from Telegram…"}</div>
-            <pre className="mm-log">{jobs?.log?.split("\n").slice(-4).join("\n") || "(starting…)"}</pre>
+            <div>{listing.state === "waiting" ? listing.note : t("system.mm.fetching")}</div>
+            <pre className="mm-log">{jobs?.log?.split("\n").slice(-4).join("\n") || t("system.starting")}</pre>
             {jobs?.running && (
               <button className="btn danger sm" style={{ marginTop: 8 }}
-                onClick={async () => { await api.jobStop(false); toast("Stopping — list loads next", "info"); }}>
-                ■ stop current job
+                onClick={async () => { await api.jobStop(false); toast(t("system.mm.stoppingList"), "info"); }}>
+                <Ic.CircleOff size={13} /> {t("system.jobs.stopCurrent")}
               </button>
             )}
           </div>
@@ -225,7 +253,7 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
       )}
 
       {!busy && dialogs === null && (
-        <div className="mm-note dim">Loading…</div>
+        <div className="mm-note dim">{t("state.loading")}</div>
       )}
       {!busy && dialogs !== null && renderOthers()}
     </Modal>

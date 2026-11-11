@@ -47,6 +47,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../src/api/client", () => ({ api: mocks }));
 
 import { StoreProvider, useStore } from "../src/state/store";
+import { LangProvider } from "../src/i18n";
 import { AiPanel } from "../src/components/AiPanel";
 import { FilterBar } from "../src/components/FilterBar";
 import { Toasts } from "../src/components/Toasts";
@@ -67,10 +68,12 @@ describe("v0.4 AI scope chips", () => {
 
   it("sends the selected group + date scope with the question", async () => {
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <AiPanel />
         <Toasts />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
 
     // default: all groups, all time
@@ -97,9 +100,11 @@ describe("v0.4 AI scope chips", () => {
   it("scope date preset persists across reloads", async () => {
     localStorage.setItem("tgq-ai-scope-days", "7d");
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <AiPanel />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
     const ta = screen.getByPlaceholderText(/Ask a question/);
     fireEvent.change(ta, { target: { value: "hi" } });
@@ -117,10 +122,12 @@ describe("v0.4 save search", () => {
 
   it("saves the current query + filters under a name", async () => {
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <FilterBar />
         <Toasts />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
 
     const save = await screen.findByRole("button", { name: /Save search/i });
@@ -159,9 +166,11 @@ describe("v0.4 store: applySaved", () => {
       return null;
     };
     render(
-      <StoreProvider>
+      <LangProvider>
+        <StoreProvider>
         <Probe />
-      </StoreProvider>,
+        </StoreProvider>
+      </LangProvider>,
     );
     await waitFor(() => expect(store).toBeTruthy());
 

@@ -1,9 +1,12 @@
 /** Prominent search input with recent-search dropdown and mode handling. */
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../state/store";
+import { useLang } from "../i18n";
+import { Ic } from "../design/icons";
 
 export function SearchBar() {
   const { mode, q, runSearch, searchHistory, pushSearch } = useStore();
+  const { t } = useLang();
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -34,11 +37,11 @@ export function SearchBar() {
   return (
     <div className="searchbar">
       <div className="searchbox">
-        <span className="search-ic">🔍</span>
+        <span className="search-ic"><Ic.Search size={15} /></span>
         <input
           ref={inputRef}
           className="input"
-          placeholder={mode === "search" ? "Search active - Enter to re-run, Esc to clear" : "Search messages…  (press /)"}
+          placeholder={mode === "search" ? t("search.activePlaceholder") : t("search.placeholder")}
           value={value}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 150)}
@@ -55,14 +58,18 @@ export function SearchBar() {
             }
           }}
         />
-        {mode === "search" && (
-          <button className="btn sm ghost" title="Back to browse" onClick={() => runSearch("")}>✕</button>
-        )}
+        <button
+          className="btn sm ghost search-clear"
+          title={t("search.backToBrowse")}
+          onClick={() => { setValue(""); runSearch(""); }}
+        >
+          <Ic.Close size={13} />
+        </button>
       </div>
       {showHistory && (
         <div className="history-panel">
           <div className="history-head">
-            <span className="label">Recent searches</span>
+            <span className="label">{t("search.recent")}</span>
           </div>
           {searchHistory.map((h, i) => (
             <button key={i} className="history-item" onMouseDown={() => { pushSearch(h.q); submit(h.q); }}>

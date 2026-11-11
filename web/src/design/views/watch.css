@@ -1,0 +1,48 @@
+/* Watchlists + Alerts workspace. */
+.wl-row {
+  display: flex; align-items: center; gap: 8px; padding: 10px 22px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.wl-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  background: none; border: none; cursor: pointer; text-align: start; padding: 0;
+}
+.wl-main:hover .g-title { color: var(--accent); }
+.wl-terms { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
+
+/* toolbar subtitle */
+.wl-sub { font-size: var(--fs-small); }
+
+/* watchlist card icon */
+.wl-ic {
+  width: 26px; height: 26px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); border: 1px solid var(--accent-line);
+  color: var(--accent); border-radius: var(--r-s);
+}
+
+/* term chips (tracked terms, then excluded terms) */
+.wl-term {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: var(--fs-caption); font-weight: 550; color: var(--dim);
+  background: var(--surface-2); border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill); padding: 1px 9px;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wl-term.off {
+  color: var(--err); background: var(--err-soft); border-color: transparent;
+}
+.wl-terms:empty { display: none; }
+
+/* scope chips inside the watchlist editor */
+.wl-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+
+/* alerts: unread edge + matched-term callout */
+.alert-unread { border-inline-start: 2px solid var(--accent); }
+.wl-matched {
+  background: var(--accent-soft);
+  border-inline-start-color: var(--accent);
+  align-items: center;
+}
+.wl-matched svg { flex: none; color: var(--accent); }

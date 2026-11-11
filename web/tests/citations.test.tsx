@@ -31,6 +31,7 @@ vi.mock("../src/api/client", () => ({ api: mocks }));
 import { AiPanel } from "../src/components/AiPanel";
 import { Toasts } from "../src/components/Toasts";
 import { StoreProvider } from "../src/state/store";
+import { LangProvider } from "../src/i18n";
 
 const TURN: ChatTurn = {
   question: "q",
@@ -46,10 +47,12 @@ const TURN: ChatTurn = {
 function renderPanel(turn: ChatTurn) {
   localStorage.setItem("tgq-ai-chat", JSON.stringify([turn]));
   return render(
-    <StoreProvider>
+    <LangProvider>
+      <StoreProvider>
       <AiPanel />
       <Toasts />
-    </StoreProvider>,
+      </StoreProvider>
+    </LangProvider>,
   );
 }
 

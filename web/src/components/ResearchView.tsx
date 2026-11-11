@@ -1,15 +1,18 @@
-/** Research workspace (v0.5): ask a question, get a saved, cited,
- *  re-runnable brief. Versions preserve history; staleness is computed
+/** Research workspace: ask a question, get a saved, cited, re-runnable
+ *  brief. Versions preserve history; staleness is computed
  *  deterministically (never by the LLM). */
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
+import { useLang } from "../i18n";
 import type { Brief } from "../api/types";
 import { mdToHtml } from "../utils/markdown";
 import { EmptyState } from "./EmptyState";
+import { Ic } from "../design/icons";
 
 export function ResearchView() {
   const { appState, toast, groups, jobs, selection, toggleGroup } = useStore();
+  const { t } = useLang();
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [question, setQuestion] = useState("");
@@ -56,7 +59,7 @@ export function ResearchView() {
       return null;
     });
     if (r) {
-      toast("Research queued - watch Jobs for progress", "info");
+      toast(t("research.queued"), "info");
       setQuestion("");
       setSelectedId(r.id);
     }
@@ -67,8 +70,8 @@ export function ResearchView() {
   if (appState && !appState.ai_configured) {
     return (
       <div className="feed-col">
-        <EmptyState icon="🔬" title="Research needs an AI provider"
-                    hint="Configure AI_API_KEY in Settings to generate evidence-linked research briefs. Everything stays local - only the retrieved excerpts are sent to your provider." />
+        <EmptyState icon="BookOpen" title={t("research.needsAi")}
+                    hint={t("research.needsAiHint")} />
       </div>
     );
   }
@@ -76,7 +79,7 @@ export function ResearchView() {
   return (
     <div className="feed-col research-col">
       <div className="bm-bar research-form">
-        <textarea className="input" rows={2} placeholder="Research question… e.g. Summarize everything about kubernetes migration · ما كل النقاشات حول الترقية؟"
+        <textarea className="input" rows={2} placeholder={t("research.placeholder")}
                   dir="auto" value={question}
                   onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => {
@@ -86,35 +89,37 @@ export function ResearchView() {
                     }
                   }} />
         <div className="research-ctrl">
-          <select className="input" value={scopeDays} title="Date scope"
+          <select className="input" value={scopeDays} title={t("research.dateScope")}
                   onChange={(e) => setScopeDays(e.target.value as typeof scopeDays)}>
-            <option value="all">All time</option>
-            <option value="30d">Last 30 days</option>
-            <option value="90d">Last 90 days</option>
-            <option value="custom">Custom…</option>
+            <option value="all">{t("research.scope.all")}</option>
+            <option value="30d">{t("research.scope.30")}</option>
+            <option value="90d">{t("research.scope.90")}</option>
+            <option value="custom">{t("research.scope.custom")}</option>
           </select>
           {scopeDays === "custom" && (
             <span className="date-range">
               <input type="date" className="input" style={{ width: 130 }} value={from}
                      onChange={(e) => setFrom(e.target.value)} />
-              <span>→</span>
+              <span><Ic.ArrowRight size={13} /></span>
               <input type="date" className="input" style={{ width: 130 }} value={to}
                      onChange={(e) => setTo(e.target.value)} />
             </span>
           )}
           <button className="btn primary sm" disabled={!question.trim() || creating}
                   onClick={() => void create()}>
-            {creating ? "Working…" : "Research it"}
+            {creating
+              ? <><Ic.Spin size={13} className="spin" /> {t("research.working")}</>
+              : t("research.submit")}
           </button>
         </div>
       </div>
 
       <div className="research-body">
         <aside className="brief-list">
-          <div className="side-head"><span className="label">Briefs</span></div>
-          {briefs === null && <div className="side-note">loading…</div>}
+          <div className="side-head"><span className="label">{t("research.briefs")}</span></div>
+          {briefs === null && <div className="side-note">{t("state.loading")}</div>}
           {briefs?.length === 0 && (
-            <div className="side-note">No briefs yet - ask your first question above.</div>
+            <div className="side-note">{t("research.noBriefs")}</div>
           )}
           {briefs?.map((b) => (
             <button key={b.id}
@@ -125,20 +130,20 @@ export function ResearchView() {
                 {(b.latest?.created_at ?? b.created_at).slice(0, 10)}
                 {b.stale_count > 0 && (
                   <span className="badge warn" style={{ marginInlineStart: 6 }}>
-                    {b.stale_count} new
+                    {t("research.nNew", { n: b.stale_count })}
                   </span>
                 )}
               </span>
             </button>
           ))}
           <div className="side-head" style={{ marginTop: 12 }}>
-            <span className="label">Groups in scope</span>
+            <span className="label">{t("research.groupsInScope")}</span>
           </div>
           <div className="chips" style={{ padding: "0 8px", flexWrap: "wrap" }}>
             {groups.map((g) => (
               <button key={g.chat_id}
                       className={`chip ${selection.has(g.chat_id) ? "on" : ""}`}
-                      dir="auto" title="Toggle group in scope"
+                      dir="auto" title={t("research.toggleGroup")}
                       onClick={() => toggleGroup(g.chat_id)}>
                 {g.title.length > 18 ? g.title.slice(0, 18) + "…" : g.title}
               </button>
@@ -148,12 +153,12 @@ export function ResearchView() {
 
         <div className="brief-view">
           {!selected && (
-            <EmptyState icon="🔬" title="Your research desk"
-                        hint="Ask a question about your groups. The answer becomes a saved, cited brief you can re-run weekly - it will tell you when new relevant messages appeared since." />
+            <EmptyState icon="BookOpen" title={t("research.desk")}
+                        hint={t("research.deskHint")} />
           )}
           {selected && !selected.latest && (
-            <EmptyState icon="⏳" title="Generating…"
-                        hint="Your brief is being researched. Watch the Jobs panel for live progress; this page refreshes automatically." />
+            <EmptyState icon="Hourglass" title={t("research.generating")}
+                        hint={t("research.generatingHint")} />
           )}
           {selected?.latest && (
             <BriefDetail brief={selected}
@@ -170,6 +175,7 @@ function BriefDetail({ brief, onDeleted, onReload }: {
   brief: Brief; onDeleted: () => void; onReload: () => void;
 }) {
   const { toast, jobs, select, setRightTab } = useStore();
+  const { t } = useLang();
   const [notes, setNotes] = useState(brief.notes);
   const [showCites, setShowCites] = useState(true);
   const busy = jobs?.running && jobs?.name === "brief";
@@ -177,7 +183,7 @@ function BriefDetail({ brief, onDeleted, onReload }: {
   const regenerate = async () => {
     try {
       const r = await api.briefRegenerate(brief.id);
-      toast(r.queued ? "Re-run queued - a new version is on the way" : "Already running", "info");
+      toast(r.queued ? t("research.rerunQueued") : t("research.alreadyRunning"), "info");
     } catch (e) {
       toast((e as Error).message, "err");
     }
@@ -186,7 +192,7 @@ function BriefDetail({ brief, onDeleted, onReload }: {
   const saveNotes = async () => {
     try {
       await api.briefPatch(brief.id, { notes });
-      toast("Notes saved", "good");
+      toast(t("research.notesSaved"), "good");
       onReload();
     } catch (e) {
       toast((e as Error).message, "err");
@@ -199,7 +205,7 @@ function BriefDetail({ brief, onDeleted, onReload }: {
       select(m);
       setRightTab("details");
     } catch {
-      toast("Could not open the original message", "err");
+      toast(t("research.couldNotOpen"), "err");
     }
   };
 
@@ -211,31 +217,37 @@ function BriefDetail({ brief, onDeleted, onReload }: {
         <h3 className="brief-q" dir="auto">{brief.question}</h3>
         <div className="brief-meta">
           <span className="badge">v{ver.version}</span>
-          <span className="dim">generated {ver.created_at.slice(0, 10)} · {ver.model}</span>
+          <span className="dim">{t("research.generated", { date: ver.created_at.slice(0, 10), model: ver.model })}</span>
           {brief.stale_count > 0 && (
-            <span className="badge warn" title="New scope-matching messages appeared after this version">
-              {brief.stale_count} new message{brief.stale_count > 1 ? "s" : ""} since
+            <span className="badge warn" title={t("research.staleBadgeHint")}>
+              {t("research.staleBadge", { n: brief.stale_count })}
             </span>
           )}
           <span style={{ flex: 1 }} />
           <button className="btn primary sm" disabled={busy} onClick={() => void regenerate()}>
-            {busy ? "Working…" : "Re-run"}
+            {busy
+              ? <><Ic.Spin size={13} className="spin" /> {t("research.working")}</>
+              : <><Ic.RotateCcw size={13} /> {t("research.rerun")}</>}
           </button>
           <button className="btn ghost sm"
                   onClick={() => void (async () => {
-                    try { await api.exportBrief(brief.id, "md"); toast("Exported", "good"); }
+                    try { await api.exportBrief(brief.id, "md"); toast(t("research.exported"), "good"); }
                     catch (e) { toast((e as Error).message, "err"); }
-                  })()}>Export .md</button>
+                  })()}>
+            <Ic.FileDown size={13} /> {t("research.exportMd")}
+          </button>
           <button className="btn ghost sm"
                   onClick={() => void (async () => {
-                    try { await api.exportBrief(brief.id, "json"); toast("Exported", "good"); }
+                    try { await api.exportBrief(brief.id, "json"); toast(t("research.exported"), "good"); }
                     catch (e) { toast((e as Error).message, "err"); }
-                  })()}>.json</button>
+                  })()}>{t("research.exportJson")}</button>
           <button className="btn danger sm"
                   onClick={() => void (async () => {
-                    try { await api.briefDelete(brief.id); toast("Brief deleted", "info"); onDeleted(); }
+                    try { await api.briefDelete(brief.id); toast(t("research.deleted"), "info"); onDeleted(); }
                     catch (e) { toast((e as Error).message, "err"); }
-                  })()}>Delete</button>
+                  })()}>
+            <Ic.Trash size={13} /> {t("research.delete")}
+          </button>
         </div>
       </div>
 
@@ -244,7 +256,7 @@ function BriefDetail({ brief, onDeleted, onReload }: {
 
       <details className="ai-sources" open={showCites}
                onToggle={(e) => setShowCites((e.target as HTMLDetailsElement).open)}>
-        <summary>Citations ({ver.citations.length}) - every claim traces here</summary>
+        <summary>{t("research.citations", { n: ver.citations.length })}</summary>
         {ver.citations.map((c) => (
           <button key={c.idx} className="src-row"
                   onClick={() => void openCitation(c.chat_id, c.msg_id)}>
@@ -253,17 +265,21 @@ function BriefDetail({ brief, onDeleted, onReload }: {
             <span className="src-date">{(c.date ?? "").slice(0, 10)}</span>
             <span className="src-sender" dir="auto">{c.sender_name ?? ""}</span>
             <span className="src-text" dir="auto">{(c.text ?? "").slice(0, 110)}</span>
-            {c.tg_link && <span className="link">Telegram ↗</span>}
+            {c.tg_link && <span className="link">{t("action.openTelegram")}</span>}
           </button>
         ))}
       </details>
 
       <div className="brief-notes">
-        <span className="label">Your notes</span>
+        <span className="label">{t("research.notes")}</span>
         <textarea className="input" rows={3} dir="auto" value={notes}
-                  placeholder="Personal notes for this brief (stays local)…"
+                  placeholder={t("research.notesPlaceholder")}
                   onChange={(e) => setNotes(e.target.value)} />
-        <div><button className="btn ghost sm" onClick={() => void saveNotes()}>Save notes</button></div>
+        <div>
+          <button className="btn ghost sm" onClick={() => void saveNotes()}>
+            <Ic.Save size={13} /> {t("research.saveNotes")}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,10 +1,12 @@
 /** Filter bar: mode segment, date presets, sender/media/sort/star filters,
- *  active chips, and saving the current search (v0.4). */
+ *  active chips, and saving the current search. */
 import { useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
+import { useLang } from "../i18n";
 import type { Sender } from "../api/types";
 import { Modal } from "./Modal";
+import { Ic } from "../design/icons";
 
 export function FilterBar() {
   const {
@@ -12,26 +14,28 @@ export function FilterBar() {
     senders, selection, clearSelection, groups, hasMore,
     q, refreshSaved, toast,
   } = useStore();
+  const { t } = useLang();
 
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
 
   const activeChips: { label: string; clear: () => void }[] = [];
-  if (filters.from) activeChips.push({ label: `from ${filters.from}`, clear: () => setDateChip("all") });
+  if (filters.from)
+    activeChips.push({ label: t("filter.chip.from", { date: filters.from }), clear: () => setDateChip("all") });
   if (filters.sender)
-    activeChips.push({ label: `sender: ${filters.sender.slice(0, 24)}`, clear: () => setFilters({ sender: "" }) });
-  if (filters.media === "1") activeChips.push({ label: "with images", clear: () => setFilters({ media: "" }) });
-  if (filters.media === "0") activeChips.push({ label: "text only", clear: () => setFilters({ media: "" }) });
-  if (filters.sort === "asc") activeChips.push({ label: "oldest first", clear: () => setFilters({ sort: "desc" }) });
-  if (filters.starred) activeChips.push({ label: "⭐ starred", clear: () => setFilters({ starred: false }) });
+    activeChips.push({ label: t("filter.chip.sender", { name: filters.sender.slice(0, 24) }), clear: () => setFilters({ sender: "" }) });
+  if (filters.media === "1") activeChips.push({ label: t("filter.chip.images"), clear: () => setFilters({ media: "" }) });
+  if (filters.media === "0") activeChips.push({ label: t("filter.chip.text"), clear: () => setFilters({ media: "" }) });
+  if (filters.sort === "asc") activeChips.push({ label: t("filter.chip.oldest"), clear: () => setFilters({ sort: "desc" }) });
+  if (filters.starred) activeChips.push({ label: t("filter.chip.starred"), clear: () => setFilters({ starred: false }) });
   if (selection.size > 0)
     activeChips.push({
-      label: `${selection.size} group${selection.size > 1 ? "s" : ""}`,
+      label: t("filter.chip.groups", { n: selection.size }),
       clear: () => clearSelection(),
     });
 
   const scope = selection.size === 0
-    ? "all groups"
+    ? t("filter.allGroups")
     : groups.filter((g) => selection.has(g.chat_id)).map((g) => g.title).join(", ");
 
   const savable = (mode === "search" && !!q.trim()) ||
@@ -51,7 +55,7 @@ export function FilterBar() {
         date_to: filters.to,
         sort: filters.sort,
       });
-      toast(`Saved “${name}”`, "good");
+      toast(t("filter.savedToast", { name }), "good");
       setSaveOpen(false);
       setSaveName("");
       await refreshSaved();
@@ -64,64 +68,70 @@ export function FilterBar() {
     <div className="filterbar">
       <div className="fb-row">
         <div className="seg">
-          <button className={mode === "browse" ? "on" : ""} onClick={() => setMode("browse")}>Browse</button>
-          <button className={mode === "search" ? "on" : ""} onClick={() => { if (mode !== "search") setMode("search"); }}>Search</button>
+          <button className={mode === "browse" ? "on" : ""} onClick={() => setMode("browse")}>{t("filter.browse")}</button>
+          <button className={mode === "search" ? "on" : ""} onClick={() => { if (mode !== "search") setMode("search"); }}>{t("filter.search")}</button>
         </div>
 
         <div className="chips">
           {(["all", "today", "7d", "30d"] as const).map((c) => (
             <button key={c} className={`chip ${dateChip === c ? "on" : ""}`} onClick={() => setDateChip(c)}>
-              {c === "all" ? "All time" : c === "7d" ? "7 days" : c === "30d" ? "30 days" : "Today"}
+              {c === "all" ? t("filter.allTime") : c === "7d" ? t("filter.days", { n: 7 }) : c === "30d" ? t("filter.days", { n: 30 }) : t("filter.today")}
             </button>
           ))}
-          <button className={`chip ${dateChip === "custom" ? "on" : ""}`} onClick={() => setDateChip("custom")}>📅</button>
+          <button
+            className={`chip ${dateChip === "custom" ? "on" : ""}`}
+            title={t("filter.custom")}
+            onClick={() => setDateChip("custom")}
+          >
+            <Ic.CalendarDays size={13} />
+          </button>
         </div>
         {dateChip === "custom" && (
           <span className="date-range">
             <input type="date" className="input" style={{ width: 130 }} value={filters.from}
               onChange={(e) => { setFilters({ from: e.target.value }); setDateChip("custom"); }} />
-            <span>→</span>
+            <span><Ic.ArrowRight size={13} /></span>
             <input type="date" className="input" style={{ width: 130 }} value={filters.to}
               onChange={(e) => { setFilters({ to: e.target.value }); setDateChip("custom"); }} />
           </span>
         )}
 
-        <select id="f-sender" className="input" style={{ maxWidth: 190 }} title="Sender"
+        <select id="f-sender" className="input" style={{ maxWidth: 190 }} title={t("filter.anySender")}
           value={filters.sender} onChange={(e) => setFilters({ sender: e.target.value })}>
-          <option value="">Any sender</option>
+          <option value="">{t("filter.anySender")}</option>
           {senders.map((s: Sender) => (
             <option key={s.sender_name} value={s.sender_name}>{s.sender_name} ({s.count})</option>
           ))}
         </select>
 
-        <select className="input" style={{ maxWidth: 130 }} title="Message type"
+        <select className="input" style={{ maxWidth: 130 }} title={t("filter.anyType")}
           value={filters.media} onChange={(e) => setFilters({ media: e.target.value })}>
-          <option value="">Any type</option>
-          <option value="1">With images</option>
-          <option value="0">Text only</option>
+          <option value="">{t("filter.anyType")}</option>
+          <option value="1">{t("filter.withImages")}</option>
+          <option value="0">{t("filter.textOnly")}</option>
         </select>
 
-        <select className="input" style={{ maxWidth: 140 }} title="Sort"
+        <select className="input" style={{ maxWidth: 140 }} title={t("filter.newestFirst")}
           value={filters.sort} onChange={(e) => setFilters({ sort: e.target.value })}>
-          <option value="desc">Newest first</option>
-          <option value="asc">Oldest first</option>
+          <option value="desc">{t("filter.newestFirst")}</option>
+          <option value="asc">{t("filter.oldestFirst")}</option>
         </select>
 
         <button
           className={`chip ${filters.starred ? "on" : ""}`}
-          title="Show only bookmarked messages"
+          title={t("filter.starredHint")}
           onClick={() => setFilters({ starred: !filters.starred })}
         >
-          ⭐ Starred
+          <Ic.Star size={13} /> {t("filter.starred")}
         </button>
 
         <button
           className="chip"
-          title="Save this search + filters under a name"
+          title={t("filter.saveHint")}
           disabled={!savable}
           onClick={() => setSaveOpen(true)}
         >
-          💾 Save search
+          <Ic.Save size={13} /> {t("filter.save")}
         </button>
       </div>
 
@@ -130,31 +140,28 @@ export function FilterBar() {
         <span className="fb-chips">
           {activeChips.map((c, i) => (
             <button key={i} className="chip on" onClick={c.clear}>
-              {c.label} <span className="x">✕</span>
+              {c.label} <span className="x"><Ic.Close size={11} /></span>
             </button>
           ))}
         </span>
-        {mode === "browse" && hasMore && <span className="fb-more">more on scroll</span>}
+        {mode === "browse" && hasMore && <span className="fb-more">{t("filter.moreOnScroll")}</span>}
       </div>
 
       {saveOpen && (
-        <Modal title="Save search" onClose={() => setSaveOpen(false)}
+        <Modal title={t("filter.saveTitle")} onClose={() => setSaveOpen(false)}
           footer={
             <>
-              <button className="btn ghost sm" onClick={() => setSaveOpen(false)}>Cancel</button>
+              <button className="btn ghost sm" onClick={() => setSaveOpen(false)}>{t("action.cancel")}</button>
               <button className="btn primary sm" disabled={!saveName.trim()} onClick={() => void saveCurrent()}>
-                Save
+                {t("action.save")}
               </button>
             </>
           }>
-          <p className="mm-note dim">
-            Saves the query, selected groups, and filters - not the result rows.
-            Run it any time to re-execute against the live archive.
-          </p>
+          <p className="mm-note dim">{t("filter.saveNote")}</p>
           <input
             className="input"
             autoFocus
-            placeholder="Name, e.g. أروع العروض / best deals"
+            placeholder={t("filter.savePlaceholder")}
             value={saveName}
             dir="auto"
             maxLength={100}
@@ -165,10 +172,10 @@ export function FilterBar() {
           />
           <div className="save-summary">
             {(mode === "search" && q) ? <span className="chip on">“{q.slice(0, 40)}”</span> : null}
-            {selection.size > 0 && <span className="chip on">{selection.size} group(s)</span>}
-            {(filters.from || filters.to) && <span className="chip on">{filters.from || "…"} → {filters.to || "…"}</span>}
-            {filters.sender && <span className="chip on">sender</span>}
-            {filters.media && <span className="chip on">{filters.media === "1" ? "images" : "text"}</span>}
+            {selection.size > 0 && <span className="chip on">{t("filter.chip.groups", { n: selection.size })}</span>}
+            {(filters.from || filters.to) && <span className="chip on">{filters.from || "…"} <Ic.ArrowRight size={11} /> {filters.to || "…"}</span>}
+            {filters.sender && <span className="chip on">{t("filter.chip.sender", { name: "" })}</span>}
+            {filters.media && <span className="chip on">{filters.media === "1" ? t("filter.chip.images") : t("filter.chip.text")}</span>}
           </div>
         </Modal>
       )}

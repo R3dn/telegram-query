@@ -3,6 +3,54 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.0] - 2026-11-11
+
+First desktop release: Windows installers, a full UI/UX overhaul, and
+a bilingual (EN/AR + true RTL) workspace. Schema unchanged from v9;
+additive API only. Details: [release-notes.md](release-notes.md).
+
+### Added
+- **Windows packaging**: PyInstaller onedir build (`desktop.py` entry,
+  windowed, no console), WiX MSI + Burn setup EXE from one shared
+  definition, per-machine install with shortcuts and a single
+  Add/Remove-Programs entry, fixed upgrade GUIDs, SHA-256 checksums
+  (`scripts/build_windows.py`, CI job `packaging`).
+- **Desktop runtime** (`desktop.py`): named-mutex single instance,
+  loopback-only bind, busy-port fallback recorded in `runtime.json`,
+  health-gated browser open, explicit quit with graceful shutdown,
+  rotating file log, native crash dialogs.
+- **User-data placement** (`config.py`, frozen-aware): packaged builds
+  keep mutable data in `%LOCALAPPDATA%\TelegramQuery` — never inside
+  Program Files; uninstall preserves it by design.
+- **Copy-based archive migration** (`migration.py`): never overwrites,
+  backs up, idempotent, interrupt-safe; preserves the Telegram session
+  and settings.
+- **Erase API + Settings action** (`api/data.py`): explicit, typed-
+  confirmation full cleanup for the packaged app.
+- **UI design system** (`web/src/design/`): token-based themes
+  (layered surfaces, type scale, elevation, motion), self-hosted
+  Inter Variable + Noto Sans Arabic, per-view stylesheets.
+- **Lucide icon system** (`web/src/design/icons.tsx`): every emoji in
+  the UI replaced; one stroke weight; directional icons auto-mirror
+  in RTL.
+- **Bilingual UI** (`web/src/i18n/`): English/Arabic switch, per-view
+  string tables, `<html lang/dir>` set before first paint, logical
+  CSS properties throughout, `dir="auto"` on user content.
+- **Packaged-app test harness** (`scripts/test_packaged_app.py`):
+  launch → port discovery → health payload → data isolation →
+  single-instance → graceful-quit checks.
+- Bundled `cryptg` for native-speed Telegram crypto in packaged builds.
+
+### Changed
+- Feed: memoized message cards + stable handlers — store updates no
+  longer re-render the feed.
+- Visual refresh of every workspace (Discover, Browse, Bookmarks,
+  Deals, Decisions, Research, Watchlists, Alerts, Digests, FAQs,
+  Entities, AI panel, Details panel, onboarding) with focus-visible
+  rings and restyled empty/loading states.
+- CI gains a Windows `packaging` job producing the installers as
+  artifacts; `web/package.json` now tracks `config.__version__`.
+
 ## [Unreleased]
 
 ## [0.9.0] - 2026-11-10

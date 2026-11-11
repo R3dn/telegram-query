@@ -1,30 +1,76 @@
 """Centralized configuration for Telegram Query.
 
-All settings come from environment variables; a ``.env`` file next to the
-application root is loaded automatically (see ``.env.example`` for the full
-reference).
+All settings come from environment variables; a ``.env`` file is loaded
+automatically (see ``.env.example`` for the full reference).
 
-Path resolution order (keeps existing installations working untouched):
-  1. explicit environment variable (``TG_SESSION_PATH`` / ``TG_DB_PATH``)
-  2. legacy files next to the application root (``tg_session.session`` /
-     ``messages.db``)
-  3. new default under the data dir (``TG_DATA_DIR``, default ``<app>/data``)
+Path resolution (v1.0 adds packaged desktop runs; source runs unchanged):
+
+Source runs (``python app.py``)
+  ``APP_ROOT`` is the repository; ``.env`` sits next to it and mutable
+  data defaults to ``<repo>/data`` - identical to every earlier version.
+
+Frozen runs (PyInstaller, ``TelegramQuery.exe``)
+  ``APP_ROOT`` is PyInstaller's read-only support directory (holds the
+  code and the bundled ``web/dist``). Mutable data moves to
+  ``%LOCALAPPDATA%\\TelegramQuery`` (per-user, always writable, never
+  inside Program Files). The ``.env`` file lives there as well.
+
+Per-path resolution order:
+  1. explicit environment variable (``TG_SESSION_PATH`` / ``TG_DB_PATH`` /
+     ``TG_DATA_DIR``)
+  2. legacy files next to the application root (source runs only)
+  3. default under the data dir
 """
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-APP_ROOT = Path(__file__).resolve().parent
+IS_FROZEN = bool(getattr(sys, "frozen", False))
 
-load_dotenv(APP_ROOT / ".env")
+# Read-only application code + assets (web/dist). Frozen: _MEIPASS dir.
+APP_ROOT = (Path(getattr(sys, "_MEIPASS", "")).resolve() if IS_FROZEN
+            else Path(__file__).resolve().parent)
+# On-disk installation root (the directory containing TelegramQuery.exe).
+INSTALL_DIR = Path(sys.executable).resolve().parent if IS_FROZEN else APP_ROOT
+# Built React frontend served by FastAPI.
+WEB_DIST = APP_ROOT / "web" / "dist"
 
-ENV_FILE = APP_ROOT / ".env"   # written by the setup wizard; tests redirect this
 
-__version__ = "0.9.0"
+def _default_data_dir() -> Path:
+    """Where mutable user data lives by default.
+
+    Frozen: ``%LOCALAPPDATA%\\TelegramQuery`` - per-user, always writable,
+    survives upgrades and uninstalls, never inside Program Files.
+    Source: ``<repo>/data`` (unchanged since v0.3).
+    """
+    if IS_FROZEN:
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base) / "TelegramQuery"
+        return Path.home() / "AppData" / "Local" / "TelegramQuery"
+    return APP_ROOT / "data"
+
+
+def resolve_data_dir() -> Path:
+    """Effective data dir: ``TG_DATA_DIR`` override or the platform default."""
+    raw = os.environ.get("TG_DATA_DIR", "").strip()
+    return Path(raw).expanduser().resolve() if raw else _default_data_dir()
+
+
+DATA_DIR = resolve_data_dir()
+
+# Written by the setup wizard; tests redirect this. Frozen builds keep the
+# .env in the (writable) data dir - never inside Program Files.
+ENV_FILE = DATA_DIR / ".env" if IS_FROZEN else APP_ROOT / ".env"
+
+load_dotenv(ENV_FILE)
+
+__version__ = "1.0.0"
 
 
 def _env(*names: str, default: str = "") -> str:
@@ -139,9 +185,13 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    raw_data_dir = _env("TG_DATA_DIR")
-    data_dir = (Path(raw_data_dir).expanduser().resolve()
-                if raw_data_dir else APP_ROOT / "data")
+    data_dir = resolve_data_dir()
+    # Legacy candidates only apply to source runs. Frozen installs always
+    # resolve to the canonical user-data dir; older archives found beside
+    # the exe are migrated there first (see migration.py) - a frozen app
+    # must never write next to Program Files.
+    legacy_session = () if IS_FROZEN else (session_file(APP_ROOT / "tg_session"),)
+    legacy_db = () if IS_FROZEN else (APP_ROOT / "messages.db",)
     return Settings(
         host=_env("HOST", default="127.0.0.1"),
         port=int(_env("PORT", default="8000")),
@@ -151,14 +201,14 @@ def load_settings() -> Settings:
         tg_api_hash=_env("TG_API_HASH", "TELEGRAM_API_HASH"),
         session_path=_resolve_path(
             ("TG_SESSION_PATH", "TG_SESSION"),
-            (session_file(APP_ROOT / "tg_session"),),
+            legacy_session,
             session_file(data_dir / "tg_session")),
         sync_days=int(_env("SYNC_DAYS", default="3")),
 
         data_dir=data_dir,
         db_path=_resolve_path(
             ("TG_DB_PATH",),
-            (APP_ROOT / "messages.db",),
+            legacy_db,
             data_dir / "messages.db"),
 
         ai_base_url=_env("AI_BASE_URL"),
@@ -178,6 +228,18 @@ def load_settings() -> Settings:
 
 
 settings = load_settings()
+
+
+def reload_settings() -> None:
+    """Re-read ``.env`` and rebuild :data:`settings`.
+
+    Used by the desktop launcher after an auto-migration may have copied
+    a ``.env`` into the data dir (too late for the initial import-time
+    load). Existing environment variables always win over the file, so an
+    explicit override is never clobbered.
+    """
+    load_dotenv(ENV_FILE)
+    globals()["settings"] = load_settings()
 
 
 def _format_env_value(value: str) -> str:

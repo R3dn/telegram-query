@@ -1,4 +1,4 @@
-/** Bookmarks workspace (v0.4): starred messages + private notes.
+/** Bookmarks workspace (v1.0 design): starred messages + private notes.
 
 Every row references the original archived message; "jump" opens it in the
 feed details panel, and the Telegram link opens the original when one
@@ -6,12 +6,15 @@ exists (public groups / supergroups only - never fabricated). */
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
+import { useLang } from "../i18n";
 import type { BookmarkRow } from "../api/types";
 import { fmtDateTime } from "../utils/format";
 import { EmptyState } from "./EmptyState";
+import { Ic } from "../design/icons";
 
 export function BookmarksView() {
   const { select, setRightTab, toast } = useStore();
+  const { t } = useLang();
   const [rows, setRows] = useState<BookmarkRow[] | null>(null);
   const [q, setQ] = useState("");
 
@@ -25,8 +28,8 @@ export function BookmarksView() {
   };
 
   useEffect(() => {
-    const t = setTimeout(() => void load(q), q ? 250 : 0);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => void load(q), q ? 250 : 0);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
@@ -35,7 +38,7 @@ export function BookmarksView() {
       await api.bookmarkDelete(b.chat_id, b.msg_id);
       setRows((r) => (r ?? []).filter(
         (x) => !(x.chat_id === b.chat_id && x.msg_id === b.msg_id)));
-      toast("Bookmark removed", "info");
+      toast(t("feed.unmarked"), "info");
     } catch (e) {
       toast((e as Error).message, "err");
     }
@@ -58,16 +61,16 @@ export function BookmarksView() {
     if (!b.tg_link) return;
     try {
       await navigator.clipboard.writeText(b.tg_link);
-      toast("Link copied", "good");
+      toast(t("bookmarks.linkCopied"), "good");
     } catch {
-      toast("Copy failed", "err");
+      toast(t("bookmarks.copyFailed"), "err");
     }
   };
 
   const exportAs = async (format: "md" | "json") => {
     try {
       const name = await api.exportBookmarks(format);
-      toast(`Exported: ${name}`, "good");
+      toast(t("bookmarks.exportDone", { name }), "good");
     } catch (e) {
       toast((e as Error).message, "err");
     }
@@ -76,18 +79,22 @@ export function BookmarksView() {
   return (
     <div className="feed-col">
       <div className="bm-bar">
-        <h2 className="bm-title">Bookmarks</h2>
+        <h2 className="bm-title">{t("bookmarks.title")}</h2>
         <input
           className="input"
           style={{ maxWidth: 300 }}
-          placeholder="Search notes and messages…"
+          placeholder={t("bookmarks.searchPlaceholder")}
           value={q}
           dir="auto"
           onChange={(e) => setQ(e.target.value)}
         />
         <span style={{ flex: 1 }} />
-        <button className="btn ghost sm" onClick={() => void exportAs("md")}>Export .md</button>
-        <button className="btn ghost sm" onClick={() => void exportAs("json")}>Export .json</button>
+        <button className="btn ghost sm" onClick={() => void exportAs("md")}>
+          <Ic.FileDown size={13} /> {t("bookmarks.exportMd")}
+        </button>
+        <button className="btn ghost sm" onClick={() => void exportAs("json")}>
+          <Ic.FileDown size={13} /> {t("bookmarks.exportJson")}
+        </button>
       </div>
 
       <div className="feed">
@@ -102,35 +109,46 @@ export function BookmarksView() {
         )}
         {rows !== null && rows.length === 0 && (
           <EmptyState
-            icon="⭐"
-            title={q ? "No bookmarks match" : "No bookmarks yet"}
+            icon="Star"
+            title={q ? t("bookmarks.noMatchTitle") : t("bookmarks.emptyTitle")}
             hint={q
-              ? "Nothing matches that search. Try a different word."
-              : "Star messages in the feed (or the Details panel) to keep them here. Notes stay on this machine and are never sent to the AI."}
+              ? t("bookmarks.noMatchHint")
+              : t("bookmarks.emptyHint")}
           />
         )}
         {rows !== null && rows.map((b) => (
           <div key={`${b.chat_id}:${b.msg_id}`} className="bm-card">
             <div className="bm-head">
-              <button className="star on" title="Remove bookmark"
-                      onClick={() => void unstar(b)}>★</button>
+              <button className="star on" title={t("feed.unmarkHint")}
+                      onClick={() => void unstar(b)}>
+                <Ic.Star size={14} fill="currentColor" />
+              </button>
               <span className="bm-grp" dir="auto">{b.chat_title}</span>
               <span className="bm-date">{fmtDateTime(b.date)} UTC</span>
-              <span className="bm-sender" dir="auto">{b.sender_name || "unknown"}</span>
+              <span className="bm-sender" dir="auto">{b.sender_name || t("feed.unknown")}</span>
               <span style={{ flex: 1 }} />
-              <button className="btn ghost sm" onClick={() => jump(b)}>Jump</button>
+              <button className="btn ghost sm" onClick={() => jump(b)}>
+                <Ic.ArrowRight size={13} /> {t("bookmarks.jump")}
+              </button>
               {b.tg_link && (
                 <>
-                  <button className="btn ghost sm" title="Open the original in Telegram"
+                  <button className="btn ghost sm" title={t("action.openTelegram")}
                           onClick={() => window.open(b.tg_link!, "_blank", "noopener")}>
-                    Telegram ↗
+                    {t("bookmarks.telegram")} <Ic.ExternalLink size={13} />
                   </button>
-                  <button className="btn ghost sm" onClick={() => void copyLink(b)}>Copy link</button>
+                  <button className="btn ghost sm" onClick={() => void copyLink(b)}>
+                    <Ic.Link2 size={13} /> {t("bookmarks.copyLink")}
+                  </button>
                 </>
               )}
             </div>
-            <div className="bm-text" dir="auto">{b.text || "[no text / media only]"}</div>
-            {b.note && <div className="bm-note" dir="auto">📝 {b.note}</div>}
+            <div className="bm-text" dir="auto">{b.text || t("details.noText")}</div>
+            {b.note && (
+              <div className="bm-note" dir="auto">
+                <Ic.NotepadText size={14} />
+                <span className="bm-note-text">{b.note}</span>
+              </div>
+            )}
           </div>
         ))}
       </div>

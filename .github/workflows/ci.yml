@@ -73,3 +73,35 @@ jobs:
           PYTHONUNBUFFERED: "1"
       - name: Run E2E suite
         run: python scripts/e2e_test.py --base http://127.0.0.1:8123 --db data/e2e.db
+
+  # Windows release packaging: frontend -> PyInstaller onedir -> MSI ->
+  # Burn setup EXE, then the packaged app is exercised like a user would
+  # (launch, health, single instance, graceful quit). Artifacts are
+  # uploaded for manual install testing on a clean machine.
+  packaging:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r packaging/windows/requirements-packaging.txt
+      - name: Build installers (frontend + PyInstaller + WiX)
+        run: python scripts/build_windows.py
+        env:
+          PYTHONUNBUFFERED: "1"
+      - name: Test packaged app
+        run: python scripts/test_packaged_app.py
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TelegramQuery-windows-x64
+          path: dist/release/
+          if-no-files-found: error

@@ -1,0 +1,49 @@
+/* Deals workspace. The .deal-card / .deal-row card pattern, the .meta-ic
+   inline icon helper, the .row-chev expand affordance and the citation
+   (.deal-sources) rows are shared with the Decisions view. */
+.deal-auto-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 4px 22px 10px; font-size: var(--fs-small); color: var(--dim);
+}
+.deal-auto-row input[type="checkbox"] { margin: 0; }
+.deal-card {
+  margin: 8px 22px; background: var(--surface);
+  border: 1px solid var(--border-soft); border-radius: var(--r-l);
+  overflow: hidden; box-shadow: var(--shadow-1);
+  transition: border-color var(--dur-1) var(--ease),
+              box-shadow var(--dur-1) var(--ease);
+}
+.deal-card.open { border-color: var(--border-strong); box-shadow: var(--shadow-2); }
+.deal-row { display: flex; align-items: center; gap: 10px; padding: 11px 13px; cursor: pointer; }
+.deal-row:hover { background: var(--surface-2); }
+.deal-main { flex: 1; min-width: 0; }
+.deal-title { font-size: var(--fs-menu); font-weight: 650; }
+.deal-meta {
+  display: flex; gap: 8px; flex-wrap: wrap; font-size: var(--fs-small);
+  color: var(--dim); margin-top: 3px; align-items: center;
+}
+/* icon + label pairs inside dense meta rows (expiry, owner, due date) */
+.meta-ic { display: inline-flex; align-items: center; gap: 4px; }
+/* rotating expand affordance at the row end */
+.row-chev {
+  display: inline-flex; flex: none; color: var(--faint);
+  transition: transform var(--dur-2) var(--ease);
+}
+.deal-card.open .row-chev { transform: rotate(180deg); }
+.code-chip {
+  font-family: var(--mono); background: var(--surface-2);
+  border: 1px dashed var(--border-strong); padding: 0 7px;
+  border-radius: var(--r-xs); color: var(--accent); font-weight: 700;
+}
+.deal-detail { padding: 0 13px 13px; border-top: 1px solid var(--border-soft); }
+.deal-desc { font-size: var(--fs-small); margin: 9px 0 4px; }
+.deal-sources { margin-top: 8px; }
+.deal-sources .src-row {
+  display: flex; gap: 8px; align-items: baseline; padding: 4px 0;
+  font-size: var(--fs-small); cursor: default;
+}
+.deal-sources .src-row:hover { background: none; }
+.deal-sources .link { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.deal-actions {
+  display: flex; gap: 8px; align-items: center; margin-top: 11px; flex-wrap: wrap;
+}

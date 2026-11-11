@@ -1,6 +1,58 @@
 # Installation
 
-## Requirements
+## Windows desktop app (recommended)
+
+Download the installer from the release page:
+
+- **`TelegramQuery-Setup-x64.exe`** — the standard installer (a small
+  bootstrapper that installs the signed-off MSI with a license prompt).
+  Double-click and follow the wizard.
+- **`TelegramQuery-x64.msi`** — the same package as a plain MSI, for
+  scripted or silent installs:
+  `msiexec /i TelegramQuery-x64.msi /qn`
+
+Both install the same application to `C:\Program Files\TelegramQuery`
+with Desktop and Start Menu shortcuts, and add a "Telegram Query" entry
+in Add/Remove Programs (repair + uninstall). No Python, no Node, and no
+other dependencies are required.
+
+What to expect on first launch:
+
+- Data lives in `%LOCALAPPDATA%\TelegramQuery` (never inside Program
+  Files): your archive database, Telegram session, `.env` settings, and
+  logs (`%LOCALAPPDATA%\TelegramQuery\logs\app.log`).
+- The app binds to `127.0.0.1` only — it is reachable from your machine
+  and nothing else. If port 8000 is busy it picks a free one and still
+  opens your browser at the right address.
+- One instance at a time: a second launch focuses the running one.
+- The server API starts, the health check passes, and only then does
+  the browser open — a slow disk never produces a dead tab.
+- Quit via the in-app Exit action (the desktop runtime shuts down
+  gracefully and never leaves orphan processes).
+
+**Uninstalling** removes the application and shortcuts but *keeps* your
+data in `%LOCALAPPDATA%\TelegramQuery` — reinstall and you are right back
+where you left off. To erase everything, use the in-app Settings →
+"Erase archive" action first (explicit confirmation required), or delete
+the folder manually after uninstalling.
+
+**Upgrading the desktop app**: install the new version right over the
+old one (double-click the new Setup EXE or run the MSI). The installer
+replaces the application files, keeps your data, settings, and Telegram
+session untouched, and shows a single "Telegram Query" entry in
+Add/Remove Programs. Downgrades are refused with a clear message.
+
+**Security note**: the app is local-first. Your Telegram session and
+archive stay on your machine; the only outbound traffic is Telegram
+itself and (if configured) your chosen AI provider — never both at
+once unless you ask a question.
+
+Checksums for every release artifact are published in
+`checksums.json` next to the downloads.
+
+## Running from source
+
+### Requirements
 
 - **Python 3.10 or newer** (3.13 tested)
 - A Telegram account

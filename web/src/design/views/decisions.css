@@ -1,0 +1,11 @@
+/* Decisions workspace. Reuses the shared toolbar (.bm-bar) and, from the
+   Deals view (deals.css): the .deal-card / .deal-row card pattern, the
+   .meta-ic inline icon helper, the .row-chev expand affordance, and the
+   .deal-sources citation rows. */
+.dec-impact { display: flex; gap: 6px; align-items: center; }
+
+/* monitor strip badges sit inline with the counts */
+.deal-auto-row .badge { flex: none; }
+
+/* the follow-ups block stacks under the sources block - a touch more air */
+.deal-detail .deal-sources + .deal-sources { margin-top: 12px; }

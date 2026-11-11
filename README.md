@@ -87,6 +87,17 @@ Telegram session never leave it.
 
 ## Quick start
 
+### Windows (installer)
+
+Download **`TelegramQuery-Setup-x64.exe`** (or the plain
+**`TelegramQuery-x64.msi`** for silent installs) from the release page
+and run it. No Python, Node, or other dependencies — data lives in
+`%LOCALAPPDATA%\TelegramQuery`, survives upgrades and uninstalls, and
+the app binds to loopback only. See
+[docs/installation.md](docs/installation.md) for details.
+
+### From source
+
 Requirements: **Python 3.10+**. Node is *not* required — the frontend
 build is included.
 

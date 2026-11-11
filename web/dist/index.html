@@ -8,16 +8,26 @@
   <link rel="icon" type="image/svg+xml"
     href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%235b8def'/%3E%3Cpath d='M6 11.5 18 6l-4.5 12-2.6-4.1L6 11.5z' fill='%23fff'/%3E%3C/svg%3E" />
   <script>
-    // Set the theme before first paint to avoid a flash.
+    // Set theme, language, and direction before first paint to avoid
+    // any flash of the wrong colors or mirroring.
     (function () {
       var t = localStorage.getItem("tgq-theme");
       var dark = t ? t === "dark"
         : window.matchMedia("(prefers-color-scheme: dark)").matches;
       document.documentElement.classList.toggle("light", !dark);
+
+      var l = localStorage.getItem("tgq-lang");
+      if (l !== "ar" && l !== "en") {
+        l = (navigator.language || "").toLowerCase().startsWith("ar")
+          ? "ar" : "en";
+      }
+      document.documentElement.lang = l;
+      document.documentElement.dir = l === "ar" ? "rtl" : "ltr";
+      document.documentElement.classList.toggle("rtl", l === "ar");
     })();
   </script>
-  <script type="module" crossorigin src="/assets/index-DqUr084T.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CvtckD5L.css">
+  <script type="module" crossorigin src="/assets/index-BTwARzJQ.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-Cwq5xyMn.css">
 </head>
 <body>
   <div id="root"></div>
