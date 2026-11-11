@@ -5,8 +5,11 @@ exactly what stays local and what can leave your machine.
 
 ## What stays on your machine
 
-- **All messages** — stored in your SQLite database (`data/messages.db`)
-- **Your Telegram session and credentials** — `tg_session.session` and `.env`
+- **All messages** — stored in your SQLite database (`data/messages.db`
+  for source runs; `%LOCALAPPDATA%\TelegramQuery\messages.db` for the
+  Windows desktop app)
+- **Your Telegram session and credentials** — `tg_session.session` and
+  `.env` (both inside the data dir)
 - **Searches, filters, AI chat history** — stored in your browser's
   localStorage; they never reach any server
 - **Bookmarks and private notes** — stored in your database. Notes are app
@@ -94,8 +97,13 @@ Only two channels exist, and both are yours to control:
   citations, and alerts pointing at those messages are removed with them
   (foreign keys cascade). This cannot be undone; re-tracking re-downloads
   the history from Telegram.
-- Delete everything: stop the app and delete the `data/` directory and
-  `.env`. To revoke the app's Telegram access, also terminate the session
+- Delete everything: use **Settings → Data → Erase all data** (packaged
+  app — typed `ERASE` confirmation) or stop the app and delete the data
+  directory (`data/` for source runs,
+  `%LOCALAPPDATA%\TelegramQuery\` for the desktop app) and `.env`.
+  Uninstalling the desktop app does **not** delete your data — the data
+  folder survives uninstall by design, so erasing is explicit.
+  To revoke the app's Telegram access, also terminate the session
   from Telegram's "Active sessions" settings.
 
 ## Data minimization defaults
