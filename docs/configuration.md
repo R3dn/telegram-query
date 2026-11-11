@@ -14,8 +14,13 @@ or writes them to logs.
 - Session and database paths resolve in this order:
   1. explicit variable (`TG_SESSION_PATH` / `TG_DB_PATH`)
   2. legacy files next to the app root (`tg_session.session` / `messages.db`)
-     — keeps pre-existing installations working
-  3. default under the data dir: `data/`
+     — keeps pre-existing installations working (**source runs only**)
+  3. default under the data dir
+- The data dir itself (`TG_DATA_DIR`) defaults to `<repo>/data` for source
+  runs and to `%LOCALAPPDATA%\TelegramQuery` for the packaged desktop app
+  — where its `.env` also lives (never inside Program Files). An archive
+  found beside a packaged exe is migrated into the data dir on first
+  launch (copy + backup; the original is never modified).
 - Legacy `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` names are accepted as
   aliases of `TG_API_ID` / `TG_API_HASH`.
 
@@ -26,7 +31,7 @@ or writes them to logs.
 | `TG_API_ID` | — | API ID from my.telegram.org (required) |
 | `TG_API_HASH` | — | API hash from my.telegram.org (required) |
 | `TG_SESSION_PATH` | `data/tg_session` | Telethon session file (auth state) |
-| `TG_DATA_DIR` | `data` | Parent for defaults below |
+| `TG_DATA_DIR` | `data` (source) / `%LOCALAPPDATA%\TelegramQuery` (packaged) | Parent for defaults below |
 | `SYNC_DAYS` | `3` | Days re-scanned by the sync button to catch edits |
 
 ## Storage
@@ -89,3 +94,18 @@ closed triggers one catch-up sync on the next start.
 | `PORT` | `8000` | Listen port |
 | `LOG_LEVEL` | `INFO` | Python logging level for the server log |
 | `TG_ALLOWED_HOSTS` | — | Comma-separated extra Host headers the API accepts (the middleware only allows loopback + the configured host by default; only add hosts if you deliberately expose the app on your LAN) |
+
+## Desktop runtime (v1.0, packaged builds)
+
+These apply to `TelegramQuery.exe` (harmless no-ops in source runs):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TGQ_NO_BROWSER` | unset | Set to `1` to skip opening the browser at startup (the server still starts and reports healthy). CLI flag `--no-browser` does the same |
+| `TGQ_STARTUP_TIMEOUT` | `60` | Seconds to wait for the backend health check before showing the startup-failed dialog (minimum 5) |
+
+Desktop mode notes: the bind address is **always loopback** (a non-loopback
+`HOST` is overridden with a warning), and a busy `PORT` falls back to a
+free port — the actual port is written to `runtime.json` in the data dir,
+which is also how a second launch finds the running instance. Logs go to
+`<data>/logs/app.log` (rotating).
