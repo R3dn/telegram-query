@@ -372,6 +372,9 @@ def test_webview2_detection_reads_the_edgeupdate_pv(pv, expected, monkeypatch):
     mod.HKEY_CURRENT_USER = 2
     mod.HKEY_LOCAL_MACHINE = 1
     monkeypatch.setitem(_sys.modules, "winreg", mod)
+    # the runtime short-circuits on non-Windows (native OS webview);
+    # pin the platform so the registry stub is actually consulted
+    monkeypatch.setattr(_sys, "platform", "win32")
     ok, detail = desktop.webview2_runtime_version()
     assert ok is expected
     if expected:
