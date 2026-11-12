@@ -26,14 +26,29 @@ sys.path.insert(0, str(ROOT))
 
 SCREENSHOTS = ROOT / "docs" / "screenshots"
 
-# Real identifiers that must never appear in a screenshot (checked per shot).
-FORBIDDEN = [
-    "\u0647\u0627\u0641\u0627\u0644",          # real group name (Haval)
-    "\u0639\u0631\u0648\u0636 \u0627\u0644\u0645\u0637\u0627\u0639\u0645",  # real group name
-    "AWS Community",                            # real group name
-    "R3dn", "Redn",                             # real username
-    "cloudeng",                                 # real AI provider host
-]
+_BLOCKLIST = ROOT / "scripts" / "shot-blocklist.local.txt"
+
+
+def _load_blocklist() -> list[str]:
+    """Load personal identifiers that must never appear in screenshots.
+    The file is kept outside the repo (gitignored) so real names and
+    handles are never published.
+    """
+    blocklist: list[str] = []
+    if _BLOCKLIST.exists():
+        for line in _BLOCKLIST.read_text(encoding="utf-8").splitlines():
+            entry = line.split("#", 1)[0].strip()
+            if entry:
+                blocklist.append(entry)
+    else:
+        print(
+            f"  note: no blocklist found ({_BLOCKLIST.name}) — add one if you have"
+            " real data on this machine that must not leak into docs/screenshots/"
+        )
+    return blocklist
+
+
+FORBIDDEN = _load_blocklist()
 
 
 def seed_demo(path: Path, messages: int) -> None:

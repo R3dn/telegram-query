@@ -304,7 +304,7 @@ target (decision 0010 in docs/decisions/README.md).
 
 First desktop release: Windows installers, a full UI/UX overhaul, and
 a bilingual (EN/AR + true RTL) workspace. Schema unchanged from v9;
-additive API only. Details: [release-notes.md](release-notes.md).
+additive API only. Detailed release notes are published with each GitHub release.
 
 ### Added
 - **Windows packaging**: PyInstaller onedir build (`desktop.py` entry,
