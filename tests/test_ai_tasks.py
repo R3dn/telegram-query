@@ -62,6 +62,23 @@ def test_run_json_task_repair_then_fail(conn, monkeypatch):
     assert len(FakeClient.calls) == 2
 
 
+def test_run_json_task_repair_prompt_on_unparseable_reply(conn, monkeypatch):
+    """v1.0.2 regression: an UNPARSEABLE first reply with a repair_system
+    prompt must run the repair (not crash with UnboundLocalError). The
+    repair prompt must tell the model its reply was invalid JSON."""
+    fake = FakeClient(["total garbage {{{", '{"x": 1}'])
+    monkeypatch.setattr("ai.get_client", lambda: fake)
+    result, cached = ai_tasks.run_json_task(
+        "sys", "user", task="t", validate=_always_ok,
+        repair_system="repair sys")
+    assert result == {"x": 1} and cached is False
+    assert len(FakeClient.calls) == 2
+    repair_call = FakeClient.calls[1]
+    assert repair_call[0]["content"] == "repair sys"
+    assert "not valid JSON" in repair_call[1]["content"]
+
+
+
 def test_run_json_task_schema_repair(conn, monkeypatch):
     fake = FakeClient(['{"x": 1}', '{"x": 2}'])
     monkeypatch.setattr("ai.get_client", lambda: fake)

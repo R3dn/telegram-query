@@ -305,6 +305,7 @@ def run_json_task(system: str, user: str, task: str,
     import ai as ai_module
     requests = 0
     tokens_in = tokens_out = 0
+    err = None   # v1.0.2: unbound when the first reply is not even JSON
     try:
         for attempt in (1, 2):
             text, usage = _call_with_retry(system, user, model)

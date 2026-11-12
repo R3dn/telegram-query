@@ -242,10 +242,12 @@ def extract(conn, chat_ids=None, date_from=None, date_to=None,
                                   lead["date"][:10])]) for lead in leads]
 
     stats["candidates"] = len(grouped)
-    if incremental:
-        _advance_watermark(conn, watermark, chat_ids)
 
     if not grouped:
+        # nothing to extract above the watermark: safe to advance (this
+        # is the common no-new-deals case - it must not re-scan forever)
+        if incremental:
+            _advance_watermark(conn, watermark, chat_ids)
         return stats
 
     # batches of grouped candidates, context-budgeted
@@ -273,6 +275,12 @@ def extract(conn, chat_ids=None, date_from=None, date_to=None,
             _store_deal(conn, d, lead_rows, copies, stats)
         conn.commit()
 
+    # v1.0.2: the watermark now advances ONLY after every batch succeeded.
+    # The old code advanced it before the provider calls, so a provider
+    # failure mid-run permanently skipped those messages for incremental
+    # extraction. With the fingerprint cache, a retry of unchanged
+    # batches is free (cache hits), so at-least-once is strictly better:
+    # a failed run heals on the next sync instead of losing coverage.
     if incremental:
         _advance_watermark(conn, watermark, chat_ids)
 

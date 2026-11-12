@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import ai_tasks
 import config
 import db
 import deals
@@ -185,6 +186,62 @@ def test_incremental_watermark(conn, monkeypatch):
     # everything is below the watermark -> no candidates, no provider calls
     assert stats["candidates"] == 0
     assert len(FakeClient.calls) == 0
+
+
+def test_incremental_watermark_survives_provider_failure(conn, monkeypatch):
+    """v1.0.2 regression: the watermark used to advance BEFORE the
+    provider calls, so a provider failure mid-run permanently skipped
+    those messages for incremental extraction. It must only advance
+    after every batch succeeded - a failed run heals on the next sync
+    (unchanged batches are fingerprint-cache hits, so retries are free)."""
+    seed(conn)
+
+    class ExplodingClient(FakeClient):
+        def create(self, model=None, messages=None, temperature=None):
+            FakeClient.calls.append({"model": model, "messages": messages})
+            raise ConnectionError("provider unreachable")
+
+    monkeypatch.setattr("ai.get_client",
+                        lambda: ExplodingClient([]))
+
+    with pytest.raises(ai_tasks.TaskError):
+        deals.extract(conn, incremental=True)
+    wm = json.loads(db.get_setting(conn, "deals_watermark") or "{}")
+    assert wm == {}, "a failed extraction must not advance the watermark"
+
+    # recovery: the provider comes back; the same candidates are
+    # extracted and the watermark advances
+    fake = FakeClient([extraction([])])
+    monkeypatch.setattr("ai.get_client", lambda: fake)
+    stats = deals.extract(conn, incremental=True)
+    assert stats["candidates"] > 0
+    wm = json.loads(db.get_setting(conn, "deals_watermark") or "{}")
+    assert wm, "a successful extraction advances the watermark"
+    # and the next run has nothing new above it
+    FakeClient.calls = []
+    stats = deals.extract(conn, incremental=True)
+    assert stats["candidates"] == 0 and len(FakeClient.calls) == 0
+
+
+def test_incremental_watermark_advances_when_no_candidates(conn, monkeypatch):
+    """The common case (new messages, but none deal-like) must still
+    advance the watermark - it must not re-scan the same window on
+    every sync."""
+    seed(conn)
+    fake = FakeClient([extraction([])])
+    monkeypatch.setattr("ai.get_client", lambda: fake)
+    # new non-deal messages above the old watermark
+    for i in range(2000, 2010):
+        db.upsert_message(conn, -1, i, iso(0), 1, "x",
+                         "just chatting about nothing")
+    watermark = {str(cid): 1000 for cid in (-1, -2)}
+    db.set_setting(conn, "deals_watermark", json.dumps(watermark))
+    conn.commit()
+
+    deals.extract(conn, incremental=True)
+    wm = json.loads(db.get_setting(conn, "deals_watermark") or "{}")
+    assert wm.get("-1") == 2009, \
+        "an empty candidate window still advances to the chat max"
 
 
 def test_derived_status_matrix():
