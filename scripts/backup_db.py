@@ -11,9 +11,7 @@ Usage:
   python scripts/backup_db.py --keep 10             # retention
 
 Restore = stop the app, replace the archive file with the backup (or
-point TG_DB_PATH at it), start the app. Full procedure:
-docs/engineering/DATABASE_OPERATIONS.md.
-"""
+point TG_DB_PATH at it), start the app."""
 from __future__ import annotations
 
 import argparse

@@ -547,8 +547,7 @@ def _migrate(conn):
         # Additive only, except idx_messages_date which is REPLACED by
         # the prefix-compatible composite idx_messages_date_id (same
         # queries, faster keyset pagination); ANALYZE refreshes
-        # sqlite_stat1 once (0.33s at 500k rows - measured in
-        # docs/engineering/PERFORMANCE_BASELINE.md).
+        # sqlite_stat1 once (0.33s at 500k rows).
         conn.execute("CREATE INDEX IF NOT EXISTS "
                      "idx_messages_date_id ON messages(date, chat_id, msg_id)")
         conn.execute("DROP INDEX IF EXISTS idx_messages_date")
@@ -824,8 +823,7 @@ def search(conn, phrases, chat_ids=None, sender=None,
     (so the LIMIT keeps the meaning it always had), and only then join
     messages/chats/bookmarks for the <=limit rows that survive. The
     previous shape joined three tables for every single match before
-    ranking. Result sets are identical; see
-    docs/engineering/OPTIMIZATION_REPORT.md.
+    ranking. Result sets are identical.
     """
     # Trigram tokenizer requires >= 3 chars per phrase; drop shorter ones.
     norm = []
