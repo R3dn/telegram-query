@@ -191,6 +191,17 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
     ok = True   # flipped to False on a fetch error (v9: a failed sync must
                 # not be reported to the scheduler as a successful one)
     since = (datetime.now(timezone.utc) - timedelta(days=days)) if days else None
+    # v1.0.2: fetch-error recovery. Messages arrive NEWEST-first, so a
+    # fetch that dies midway has stored the top of a range whose middle
+    # was never fetched. Advancing last_msg_id to the newest stored id at
+    # that point permanently skips the unfetched middle (silent archive
+    # gaps), and a fresh backfill that dies before its first checkpoint
+    # used to clear the floor entirely - reported "0 pending backfills"
+    # while 90% of the history was missing. The phase + the oldest id
+    # the backfill actually stored let the error path checkpoint exactly
+    # like the cancel path does.
+    phase = None                  # "scan" | "inc" | "backfill"
+    backfill_seen = None          # oldest msg id stored by run_backfill
 
     def tick():
         nonlocal count
@@ -203,13 +214,14 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
     async def run_backfill(max_id=None):
         """Walk history newest->oldest, checkpointing every 500 messages.
         On cancel, saves the floor so the next sync resumes right here."""
-        nonlocal newest_id, count
+        nonlocal newest_id, count, backfill_seen
         kwargs = {"max_id": max_id} if max_id else {}
         seen = None
         async for msg in iter_with_flood_retry(client, chat, **kwargs):
             store_message(conn, chat_id, msg)
             newest_id = max(newest_id, msg.id)
             seen = msg.id
+            backfill_seen = msg.id
             count += 1
             if count % 200 == 0:
                 conn.commit()
@@ -230,6 +242,7 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
 
     try:
         if since:
+            phase = "scan"
             print(f"[{title}] re-scanning last {days} day(s) "
                   f"(since {since:%Y-%m-%d %H:%M} UTC, edits included) ...")
             async for msg in iter_with_flood_retry(client, chat):
@@ -241,6 +254,7 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
 
         if incremental:
             if min_id > 0:
+                phase = "inc"
                 print(f"[{title}] fetching new messages (id > {min_id}) ...")
                 async for msg in iter_with_flood_retry(client, chat, min_id=min_id):
                     store_message(conn, chat_id, msg)
@@ -248,14 +262,29 @@ async def sync_chat(client, conn, chat_id, full=False, days=None, incremental=Tr
                     tick()
 
             if floor > 0:
+                phase = "backfill"
                 print(f"[{title}] resuming backfill below id {floor} ...")
                 await run_backfill(max_id=floor - 1)
             elif min_id == 0 and not since:
+                phase = "backfill"
                 print(f"[{title}] full backfill ...")
                 await run_backfill()
     except Exception as e:
         ok = False
         print(f"  error: {e}")
+        # v1.0.2: checkpoint exactly like a cancel would. A backfill that
+        # fetched messages resumes below the oldest one it stored (None
+        # -> keep the previous floor: nothing new was stored). A scan or
+        # incremental fetch keeps the PRE-RUN watermark: the rows it did
+        # store are real (committed below) and become harmless
+        # duplicates on the next re-fetch, while the unfetched middle of
+        # the range is picked up then - never skipped.
+        if phase == "backfill":
+            if backfill_seen is not None:
+                db.set_backfill_progress(conn, chat_id, newest_id,
+                                         backfill_seen)
+        elif phase in ("scan", "inc"):
+            newest_id = min_id
 
     db.update_sync_state(conn, chat_id, newest_id)
     conn.commit()
