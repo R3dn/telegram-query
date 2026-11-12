@@ -16,25 +16,18 @@ Telegram session never leave it.
 
 ## Quick start
 
-Requirements: **Python 3.10+**.
+Download **`TelegramQuery-Setup-x64.exe`** (or the plain
+**`TelegramQuery-x64.msi`** for silent installs) from the
+[latest release](https://github.com/R3dn/telegram-query/releases/latest)
+and run it.
 
-```bash
-git clone https://github.com/<you>/telegram-query.git
-cd telegram-query
-pip install -r requirements.txt
-
-# 1. get your API credentials (one minute): https://my.telegram.org
-#    -> API development tools -> create an app
-#    (you'll paste them into the setup wizard - or pre-fill .env yourself)
-
-# 2. run
-python app.py               # -> http://127.0.0.1:8000
-```
-
-Open http://127.0.0.1:8000 — the wizard collects your API credentials,
-walks you through Telegram login, lets you pick groups, optionally
-configures an AI provider (with a live "test connection" button), and
-starts your first sync. Everything it saves lands in your local `.env`.
+- No Python, Node, or other dependencies — it opens in its own app window
+- Data lives in `%LOCALAPPDATA%\TelegramQuery`, survives upgrades and uninstalls
+- The server binds to `127.0.0.1` only — nothing is exposed to the network
+- The app is single-instance: a second click focuses the running window
+- Minimize hides the window to the system tray (left-click tray icon to restore)
+- The setup wizard walks you through Telegram login, group selection, and your
+  first sync. Everything it saves lands only on your disk.
 
 ## Asking questions
 
@@ -50,24 +43,11 @@ opens the original message.
 > **Privacy note:** asking a question sends only the excerpts it retrieves
 > to the AI endpoint you configured. Everything else stays local.
 
-## Command line
-
-`sync.py` exposes everything the UI does, for scripting:
-
-```bash
-python sync.py --login        # interactive Telegram login, then exit
-python sync.py                # incremental sync of tracked groups
-python sync.py --list         # list your groups
-python sync.py --track <id>   # track a group + full backfill
-python sync.py --untrack <id>
-python sync.py --days 3       # re-scan last 3 days (catches edits)
-python sync.py --full         # re-fetch entire history
-```
-
 ## Configuration
 
-All settings are environment variables (a `.env` file is loaded
-automatically). Copy `.env.example` to `.env` and fill in your values.
+All settings are environment variables (loaded from `.env` in your data
+folder, `%LOCALAPPDATA%\TelegramQuery\`). Copy `.env.example` to `.env` and
+fill in your values.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -88,12 +68,34 @@ automatically). Copy `.env.example` to `.env` and fill in your values.
 | `TGQ_GROUPS_HINT` | — | Optional community description for keyword extraction |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | Local bind address — keep it local |
 
-The auto-sync schedule (on/off + interval) is configured in the app's
-Settings screen and stored in your local database.
+The auto-sync schedule (on/off + interval) and all in-app settings are
+configured in the UI and stored in your local database.
 
-## Operations
+## Source run (development)
 
-- **Backup** (online, consistent snapshot): `python scripts/backup_db.py`
+Requirements: **Python 3.10+**. Node is *not* required — the compiled
+frontend is included under `web/dist/`.
+
+```bash
+git clone https://github.com/<you>/telegram-query.git
+cd telegram-query
+pip install -r requirements.txt
+python app.py               # -> http://127.0.0.1:8000
+```
+
+## Command line
+
+`sync.py` exposes everything the UI does, for scripting:
+
+```bash
+python sync.py --login        # interactive Telegram login, then exit
+python sync.py                # incremental sync of tracked groups
+python sync.py --list         # list your groups
+python sync.py --track <id>   # track a group + full backfill
+python sync.py --untrack <id>
+python sync.py --days 3       # re-scan last 3 days (catches edits)
+python sync.py --full         # re-fetch entire history
+```
 
 ## License
 
