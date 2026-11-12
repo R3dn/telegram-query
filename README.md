@@ -16,22 +16,7 @@ Telegram session never leave it.
 
 ## Quick start
 
-The desktop app is the release — Telegram Query ships only as the
-Windows installer.
-
-### Windows (installer)
-
-Download **`TelegramQuery-Setup-x64.exe`** (or the plain
-**`TelegramQuery-x64.msi`** for silent installs) from the release page
-and run it. No Python, Node, or other dependencies — it opens in its
-own app window (Microsoft Edge WebView2 Runtime, preinstalled on
-Windows 10/11), data lives in `%LOCALAPPDATA%\TelegramQuery`, survives
-upgrades and uninstalls, and the app binds to loopback only.
-
-### From source (development)
-
-Requirements: **Python 3.10+**. Node is *not* required — the frontend
-build is included.
+Requirements: **Python 3.10+**.
 
 ```bash
 git clone https://github.com/<you>/telegram-query.git
@@ -106,66 +91,9 @@ automatically). Copy `.env.example` to `.env` and fill in your values.
 The auto-sync schedule (on/off + interval) is configured in the app's
 Settings screen and stored in your local database.
 
-## Architecture
-
-FastAPI backend + React/TypeScript frontend (built output committed under
-`web/dist`, served by the backend — no Node needed at runtime). SQLite
-with WAL, an FTS5 trigram external-content index maintained incrementally,
-and a single-slot job runner so the Telegram session is never used
-concurrently.
-
 ## Operations
 
 - **Backup** (online, consistent snapshot): `python scripts/backup_db.py`
-- **Benchmarks** (repeatable perf harness): `python scripts/benchmark.py seed|db|api --messages 500000`
-- **Health**: `GET /api/health` (liveness) · `GET /api/health/ready` (readiness)
-
-## Development
-
-```bash
-pip install -r requirements.txt -r requirements-dev.txt
-ruff check . && pytest
-cd web && npm install && npm run typecheck && npm test && npm run build
-```
-
-**End-to-end** (real app + deterministic mock AI provider + synthetic
-archive - no real Telegram/LLM/keys):
-
-```bash
-python scripts/seed_demo.py --path data/e2e.db --messages 400
-python scripts/mock_ai_server.py --port 8124 &
-TG_DB_PATH=$PWD/data/e2e.db TG_SESSION_PATH=$PWD/data/e2e-session \
-  TG_API_ID=123456 TG_API_HASH=e2e AI_BASE_URL=http://127.0.0.1:8124/v1 \
-  AI_API_KEY=e2e AI_MODEL=e2e-mock PORT=8123 python app.py &
-python scripts/e2e_test.py --base http://127.0.0.1:8123 --db data/e2e.db
-```
-
-**Interactive desktop smoke test** (the full window lifecycle through
-the real `desktop.py` runtime):
-
-```bash
-pip install playwright && python -m playwright install chromium
-python scripts/e2e_smoke_desktop.py
-```
-
-The run is fully isolated — its own data dir and its own `.env`
-(via `TGQ_ENV_FILE`), so it can never touch your real archive or
-credentials.
-
-CI runs the same suite on every push.
-
-## Known limitations
-
-- Media is archived as a marker (`[image]`), not downloaded. An opt-in
-  media cache is planned for a later release; OCR is gated on it.
-- One Telegram account per installation (single session file). A second
-  installation via `TG_DATA_DIR` is the supported pattern.
-- No multi-user auth: the UI assumes the person at localhost is you.
-- Search indexes message *text*; OCR of image content is out of scope.
-- Messages deleted on Telegram remain in your archive (the archive is a
-  historical record; untrack & delete removes them locally).
-- Jobs that are queued but not yet started don't survive an app restart;
-  running jobs checkpoint and resume on the next sync.
 
 ## License
 
