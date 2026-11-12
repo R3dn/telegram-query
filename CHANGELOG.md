@@ -3,6 +3,94 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.2] - 2026-11-12
+
+Stability and correctness release from the v1.0.1 full engineering
+audit (`docs/engineering/bug-audit.md`): a critical sync-engine fix,
+honest filter semantics, and coverage repairs for the knowledge
+features. No schema migration; existing archives upgrade in place.
+
+### Fixed
+- **Critical: sync fetch errors no longer corrupt the archive
+  watermark.** Telegram delivers messages newest-first; a fetch that
+  died mid-way (network drop, RPC error) used to advance the chat's
+  `last_msg_id` past messages Telegram never gave us, permanently and
+  silently skipping the unfetched middle of the range — and a fresh
+  backfill that failed before its first checkpoint was recorded as
+  complete (`backfill_floor = 0`, "0 pending backfills") while most of
+  the history was missing. Backfills now checkpoint partial progress
+  exactly like the Stop button does, and failed scan/incremental
+  fetches keep the pre-run watermark so the next sync re-walks and
+  repairs the gap (duplicates are skipped by the idempotent upsert).
+- **AI repair path**: `run_json_task` crashed with `UnboundLocalError`
+  instead of running its one repair attempt when the first provider
+  reply was not even parseable JSON and a `repair_system` prompt was
+  supplied.
+- **Media filter in search**: the FilterBar shows the images/text
+  control in search mode, but `/api/search` silently ignored it. It is
+  now honored end-to-end (`db.search`, API, client, store), and an
+  invalid `media` value is an honest 400 rather than a silent filter
+  drop (`/api/messages` validates identically).
+- **Negative `limit` values** on the list endpoints no longer bypass
+  result caps (SQLite treats `LIMIT -1` as unlimited — one request
+  could serialize the whole archive); all endpoints clamp to
+  `max(1, min(limit, N))` and `db.browse` guards its `limit + 1`
+  arithmetic.
+- **FAQ discovery coverage**: the 90-day scan window was read
+  oldest-first, so busy archives (>1000 messages per window) silently
+  never scanned recent questions. The window is now read newest-first
+  (occurrences re-sorted so `first_seen` semantics are unchanged).
+- **Deals incremental extraction**: the per-chat watermark advanced
+  *before* the provider calls, so a provider failure mid-run
+  permanently skipped those messages. It now advances only on success
+  (and on empty windows), making failed runs self-heal on the next
+  sync — unchanged batches are fingerprint-cache hits, so retries cost
+  nothing. (`decisions` already had these semantics; `deals` was the
+  divergent copy.)
+- **Right panel responsiveness**: the 1100px layout breakpoint never
+  re-evaluated after resizing the desktop window; it now reacts to
+  window resizes.
+- **AI chat history**: stable turn keys (`turn.at`) instead of index
+  keys on the 50-turn front-trimming list (per-turn state could jump
+  between turns after a trim).
+- **Research brief notes (data integrity)**: switching briefs kept the
+  previous brief's notes in the editor; saving then wrote one brief's
+  notes onto another. The notes editor now resets with the selection.
+- **Conversation panel**: selecting a different message kept showing
+  the previous message's fetched thread; the block now resets with the
+  selection.
+- **Watchlists**: editing a paused watchlist no longer silently
+  re-enables it (the save body hard-coded `enabled: true`).
+- **Discover**: filter changes made during the first load are no
+  longer swallowed (the 30-day tab could show 7-day data until some
+  unrelated trigger), overlapping loads no longer let a slow older
+  response win, and closing the topic-timeline panel while it is
+  analyzing no longer gets resurrected by the late response.
+- **Research briefs**: submitting no longer allows duplicate briefs
+  (the busy flag never engaged because the job poller was never
+  kicked); the citation row's "Open Telegram" control now actually
+  opens Telegram.
+- **FAQs**: "Save answer" no longer closes the editor and discards
+  the typed answer when the save fails.
+- **Evidence Explorer**: every "View" jump now focuses the referenced
+  record (briefs opened the newest brief; digests/alerts/FAQs/entities
+  landed unfocused; deals/decisions burned the focus when the target
+  row was filtered out).
+- **View-level races**: sequence guards and debounces across
+  Deals/Decisions/Alerts/Entities/Digests loads (a slow older response
+  could overwrite a newer one); the Manage-Groups dialog-listing poll
+  loop stops when the modal closes; the weekly/daily schedule choice
+  is no longer discarded by the schedule modal.
+
+### Tests
+- 10 new backend regression tests (sync checkpoints/watermarks, the AI
+  repair path, search media + limit clamps, FAQ window coverage, the
+  deals watermark) and a new frontend suite
+  (`web/tests/v102.test.tsx`) pinning the brief-notes fix (verified to
+  fail on the unfixed code); full backend, frontend, API-E2E, and
+  desktop-E2E suites re-run green
+  (`docs/engineering/release-validation.md`).
+
 ## [1.0.1] - 2026-11-12
 
 Desktop-only point release: the native window + tray desktop runtime,

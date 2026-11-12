@@ -86,7 +86,7 @@ ENV_FILE = resolve_env_file()
 
 load_dotenv(ENV_FILE)
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 
 def _env(*names: str, default: str = "") -> str:

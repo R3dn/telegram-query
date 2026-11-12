@@ -1,5 +1,43 @@
 # Release notes
 
+## 1.0.2 (2026-11-12)
+
+Stability and correctness release from the full v1.0.1 engineering
+audit. No schema migration — run the installer over the old one; your
+archive, session, and settings survive by design.
+
+- **Critical sync fix**: a network error mid-fetch used to advance the
+  sync watermark past messages Telegram never delivered, silently
+  leaving permanent gaps in the archive (and a failed first backfill
+  was even recorded as complete). Backfills now checkpoint progress on
+  errors exactly like the Stop button, and failed incremental fetches
+  are re-walked and repaired by the next sync.
+- **Search filters are honest**: the images/text filter now applies in
+  search mode too (it was displayed but ignored), invalid filter
+  values return a clear error instead of being dropped, and negative
+  result-limit values can no longer request the entire archive in one
+  response.
+- **Knowledge features keep coverage**: FAQ discovery now scans the
+  newest end of its window (busy archives previously never saw recent
+  questions), and deals auto-extraction survives provider outages — a
+  failed run retries on the next sync instead of silently skipping
+  messages (cached batches cost nothing to retry).
+- **AI robustness**: the one-shot JSON repair path no longer crashes
+  when the model returns completely unparseable output.
+- **Desktop UI**: the right panel re-evaluates its layout when you
+  resize the window; the AI chat no longer mixes up per-turn state
+  after its 50-turn history wraps; the Discover view keeps up with
+  rapid filter changes; the Research notes editor resets between
+  briefs (previously one brief's notes could be saved onto another);
+  the Evidence Explorer's "View" jumps focus the referenced record in
+  every view.
+
+Full details: `docs/engineering/bug-audit.md` (16 confirmed defects —
+a critical sync-engine fix, a cross-record notes-corruption fix, and
+fourteen more, each reproduced then fixed with a regression test),
+`docs/engineering/performance-report.md` (500k-message benchmark,
+before/after), `docs/engineering/release-validation.md` (test results).
+
 ## 1.0.1 (2026-11-12)
 
 Desktop-only point release. From this release on, the Windows desktop
