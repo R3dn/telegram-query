@@ -63,7 +63,7 @@ def list_faqs(status: str = "", q: str = "", limit: int = 200):
         rows = conn.execute(
             f"SELECT * FROM faq_clusters WHERE {' AND '.join(where)} "
             "ORDER BY frequency DESC, last_seen DESC LIMIT ?",
-            (*params, min(limit, 500))).fetchall()
+            (*params, max(1, min(limit, 500)))).fetchall()
         return [_row_dict(conn, r) for r in rows]
 
 

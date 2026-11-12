@@ -152,14 +152,22 @@ def _validate(payload):
 
 
 def discover(conn, chat_ids=None, days=90, verbose=print):
-    """Scan a scope for recurring questions; create/update candidates."""
+    """Scan a scope for recurring questions; create/update candidates.
+
+    v1.0.2: the window is read NEWEST-first (sort="desc"). The previous
+    oldest-first read meant a busy archive (>1000 messages per window)
+    silently never saw recent questions - exactly the ones users expect
+    the feature to find. Occurrences are re-sorted oldest-first after
+    filtering so first_seen / display-question semantics are unchanged.
+    """
     since = (datetime.now(timezone.utc)
              - timedelta(days=days)).strftime("%Y-%m-%d")
     rows = db.browse(conn, chat_ids=chat_ids or None, date_from=since,
-                     limit=1000, sort="asc")[0]
+                     limit=1000, sort="desc")[0]
     stats = {"scanned": len(rows), "questions": 0,
              "clusters_new": 0, "clusters_updated": 0, "answered": 0}
     questions = [r for r in rows if _is_question(r["text"] or "")]
+    questions.sort(key=lambda r: r["date"] or "")   # oldest occurrence first
     stats["questions"] = len(questions)
     if not questions:
         return stats

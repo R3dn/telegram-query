@@ -118,7 +118,7 @@ def list_digests(schedule: int = None, limit: int = 100):
         rows = conn.execute(
             f"SELECT * FROM digests WHERE {' AND '.join(where)} "
             "ORDER BY created_at DESC LIMIT ?",
-            (*params, min(limit, 200))).fetchall()
+            (*params, max(1, min(limit, 200)))).fetchall()
         # list view: content preview only (full body on the detail endpoint)
         return [{**{k: v for k, v in dict(r).items()},
                  "content_md": dict(r)["content_md"][:220] + "…"}

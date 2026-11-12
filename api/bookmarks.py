@@ -70,7 +70,7 @@ def list_bookmarks(q: str = "", groups: str = "", limit: int = 500):
             query += f" AND m.chat_id IN ({marks})"
             params.extend(chat_filter)
         query += (" ORDER BY m.date DESC, m.chat_id, m.msg_id"
-                  f" LIMIT {min(limit, 1000)}")
+                  f" LIMIT {max(1, min(limit, 1000))}")
         rows = [dict(r) for r in conn.execute(query, params).fetchall()]
     return _decorate(rows)
 

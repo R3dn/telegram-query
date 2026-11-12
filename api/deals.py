@@ -91,7 +91,7 @@ def list_deals(status: str = "", category: str = "", vendor: str = "",
         rows = conn.execute(
             f"SELECT * FROM deals d WHERE {' AND '.join(clauses)} "
             f"ORDER BY {order} LIMIT ?",
-            (*params, min(limit, 500))).fetchall()
+            (*params, max(1, min(limit, 500)))).fetchall()
         return [_row_to_dict(conn, r) for r in rows]
 
 

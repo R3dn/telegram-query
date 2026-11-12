@@ -53,6 +53,8 @@ def groups():
 def messages(groups: str = "", sender: str = "", from_: str = "",
              to: str = "", media: int = None, cursor: str = "",
              limit: int = 50, sort: str = "desc", bookmarked: bool = None):
+    if media is not None and media not in (0, 1):
+        return JSONResponse({"error": "media must be 0 or 1"}, status_code=400)
     with open_db() as conn:
         rows, next_cursor, has_more = db.browse(
             conn,
@@ -62,7 +64,7 @@ def messages(groups: str = "", sender: str = "", from_: str = "",
             date_to=to or None,
             media=media,
             cursor=cursor or None,
-            limit=min(limit, 200),
+            limit=max(1, min(limit, 200)),
             sort=sort,
             bookmarked=bookmarked,
         )
@@ -125,12 +127,14 @@ def senders(groups: str = ""):
 @router.get("/api/search")
 def search(q: str = "", groups: str = "", sender: str = "",
            from_: str = "", to: str = "", limit: int = 200,
-           bookmarked: bool = None):
+           media: int = None, bookmarked: bool = None):
     if not q.strip():
         return []
     if len(q) > 1000:
         return JSONResponse({"error": "Query too long (max 1000 characters)"},
                             status_code=400)
+    if media is not None and media not in (0, 1):
+        return JSONResponse({"error": "media must be 0 or 1"}, status_code=400)
     with open_db() as conn:
         rows = db.search(
             conn,
@@ -140,7 +144,8 @@ def search(q: str = "", groups: str = "", sender: str = "",
             date_from=from_ or None,
             date_to=to or None,
             require_all=False,  # any-phrase match; ranking favors multi-hits
-            limit=min(limit, 500),
+            limit=max(1, min(limit, 500)),
+            media=media,
             bookmarked=bookmarked,
         )
     return _decorate(rows)

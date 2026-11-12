@@ -129,7 +129,7 @@ def list_decisions(status: str = "", kind: str = "", owner: str = "",
         rows = conn.execute(
             f"SELECT * FROM decisions d WHERE {' AND '.join(clauses)} "
             f"ORDER BY {order} LIMIT ?",
-            (*params, min(limit, 500))).fetchall()
+            (*params, max(1, min(limit, 500)))).fetchall()
         # status=overdue is derived, not stored: post-filter when asked
         out = [_row_to_dict(conn, r) for r in rows]
         if status == "overdue":

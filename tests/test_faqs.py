@@ -114,6 +114,28 @@ def test_unrelated_questions_do_not_merge(conn, monkeypatch):
     assert len(rows) >= 2, "different topics stay different clusters"
 
 
+def test_discover_covers_the_newest_end_of_a_busy_window(conn):
+    """v1.0.2 regression: the 1000-message window read used to start at
+    the OLDEST end of the scope, so on a busy archive the newest
+    questions (the point of the feature) were silently never scanned."""
+    db.upsert_chat(conn, -1, "Busy", "busy", "group")
+    # 1100 old non-question messages ...
+    for i in range(1, 1101):
+        db.upsert_message(conn, -1, i, iso(80), 1, "s", f"status update {i}")
+    # ... and the recurring question only in the NEWEST part of the window
+    db.upsert_message(conn, -1, 2001, iso(2), 1, "a",
+                      "how do i backup my database?")
+    db.upsert_message(conn, -1, 2002, iso(1), 1, "b",
+                      "how to backup the database?")
+    conn.commit()
+
+    faq.discover(conn, days=90)
+    rows = conn.execute(
+        "SELECT frequency FROM faq_clusters WHERE frequency >= 2").fetchall()
+    assert rows, ("the newest-window recurring question must be found even "
+                  "when the window holds more than the 1000-message cap")
+
+
 def test_faqs_api_flow(api_client, monkeypatch):
     with db.get_db() as conn:
         seed(conn)

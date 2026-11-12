@@ -48,6 +48,48 @@ def test_browse_search_senders(api_client):
     assert senders[0]["sender_name"] == "alice"
 
 
+def test_search_media_filter(api_client):
+    """v1.0.2 regression: the FilterBar media control is shown in search
+    mode, so /api/search must honor it (it used to be silently ignored
+    while the chip looked active)."""
+    c = db.get_db()
+    try:
+        db.upsert_chat(c, -1, "Test Group", "testgrp", "group")
+        db.upsert_message(c, -1, 1, "2026-01-01T10:00:00+00:00",
+                          1, "alice", "pizza deal عرض", has_media=0)
+        db.upsert_message(c, -1, 2, "2026-01-01T10:01:00+00:00",
+                          1, "bob", "pizza deal عرض", has_media=1)
+        c.commit()
+    finally:
+        c.close()
+
+    hits = api_client.get("/api/search?q=pizza").json()
+    assert len(hits) == 2, "unfiltered search sees both messages"
+    hits = api_client.get("/api/search?q=pizza&media=1").json()
+    assert len(hits) == 1 and hits[0]["has_media"] == 1, \
+        "media=1 keeps only image messages"
+    hits = api_client.get("/api/search?q=pizza&media=0").json()
+    assert len(hits) == 1 and hits[0]["has_media"] == 0, \
+        "media=0 keeps only text messages"
+    r = api_client.get("/api/search?q=pizza&media=2")
+    assert r.status_code == 400, \
+        "an invalid media value is an honest error, never a silent filter drop"
+    r = api_client.get("/api/messages?media=5")
+    assert r.status_code == 400, "browse validates media the same way"
+
+
+def test_search_rejects_negative_limits(api_client):
+    """v1.0.2 regression: a negative limit used to become SQLite's
+    LIMIT -1 (unbounded) - one request could fetch the entire archive."""
+    seed(api_client)
+    r = api_client.get("/api/search?q=pizza&limit=-1")
+    assert r.status_code == 200
+    assert len(r.json()) == 1, "the cap must hold for any limit value"
+    r = api_client.get("/api/messages?limit=-1")
+    assert r.status_code == 200 and r.json()["messages"] != [], \
+        "browse clamps negative limits instead of returning an empty page"
+
+
 def test_single_message_endpoint(api_client):
     seed(api_client)
     m = api_client.get("/api/message/-1/1")

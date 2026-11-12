@@ -161,7 +161,7 @@ def list_alerts(state: str = "new", watchlist: int = None,
                 JOIN watchlists w ON w.id = a.watchlist_id
                 WHERE {' AND '.join(where)}
                 ORDER BY m.date DESC LIMIT ?""",
-            (*params, min(limit, 500))).fetchall()
+            (*params, max(1, min(limit, 500)))).fetchall()
         out = []
         for r in rows:
             d = dict(r)

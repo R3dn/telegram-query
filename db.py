@@ -797,13 +797,16 @@ def _expand_date(d, end=False):
 
 def search(conn, phrases, chat_ids=None, sender=None,
           date_from=None, date_to=None, require_all=True, limit=200,
-          bookmarked=None, min_msg_id=None):
+          bookmarked=None, min_msg_id=None, media=None):
     """Search normalized text. Returns list of dict rows, newest first.
 
     phrases      - list of raw strings (will be normalized)
     require_all  - True: AND all phrases. False: OR, more matches = higher rank.
     bookmarked   - True: only bookmarked messages. False/None: all messages.
     min_msg_id   - only messages with msg_id > this (incremental pipelines).
+    media        - None: all. 1: only messages with media. 0: text only.
+                   (v1.0.2: the FilterBar shows this control in search mode
+                   too - previously it was displayed but silently ignored.)
     Structure (v9, measured -51% on high-hit queries at 500k rows): rank
     the FTS matches in a subquery with ALL row-level filters applied
     (so the LIMIT keeps the meaning it always had), and only then join
@@ -844,6 +847,9 @@ def search(conn, phrases, chat_ids=None, sender=None,
     if min_msg_id is not None:
         inner_where.append("m.msg_id > ?")
         params.append(int(min_msg_id))
+    if media is not None:
+        inner_where.append("m.has_media = ?")
+        params.append(1 if media else 0)
     if bookmarked:
         # EXISTS, not a JOIN: no dedup surprises, and the probe only runs
         # when the user is explicitly filtering to starred messages.
@@ -971,6 +977,8 @@ def browse(conn, chat_ids=None, sender=None, date_from=None, date_to=None,
     Returns (rows, next_cursor, has_more).
     """
     desc = sort != "asc"
+    # defense in depth: a negative limit would become LIMIT <= 0 below
+    limit = max(1, limit)
     # v9: text_norm is intentionally NOT selected - the UI never renders
     # it and it roughly doubled every feed page's payload (measured
     # 22.7 KB -> ~11 KB per 50-message page). Search uses the FTS index,
