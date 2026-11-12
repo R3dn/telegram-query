@@ -14,6 +14,23 @@ the originals.
 Everything runs on your machine: the messages, the database, and your
 Telegram session never leave it.
 
+<p>
+  <img src="docs/screenshots/discover-dark.png" alt="Discover trending topics (dark theme)" width="49.5%">
+  <img src="docs/screenshots/discover-light.png" alt="Discover trending topics (light theme)" width="49.5%">
+</p>
+
+<p>
+  <img src="docs/screenshots/feed-dark.png" alt="Browse your archive with day separators and media filters">
+</p>
+
+<p>
+  <img src="docs/screenshots/search.png" alt="Full-text search with Arabic / English term highlighting">
+</p>
+
+<p>
+  <img src="docs/screenshots/onboarding.png" alt="Setup wizard — API credentials and first sync">
+</p>
+
 ## Quick start
 
 Download **`TelegramQuery-Setup-x64.exe`** (or the plain
