@@ -14,14 +14,15 @@ run is reproducible.
 | Item | Result |
 |---|---|
 | Command | `python -m pytest tests -q` |
-| Outcome | **302 passed, 0 failed, 0 skipped** — exit 0, 107.3 s wall |
-| Baseline before this pass | 290 passed, 106 s (same machine, pre-change) |
-| New regression tests | 10 (sync fetch-error checkpoints ×4, AI repair path ×1, search media + limit clamps ×2, FAQ window coverage ×1, deals watermark ×3) |
+| Outcome | **300 passed, 0 failed, 0 skipped** — exit 0, ~107 s wall (collected count verified via `pytest --co`) |
+| Baseline before this pass | 290 passed (same machine, pre-change) |
+| New regression tests | 10 backend (sync fetch-error checkpoints ×4, AI repair path ×1, search media + limit clamps ×2, FAQ window coverage ×1, deals watermark ×2) + 2 frontend (`web/tests/v102.test.tsx`) |
 
 Full-suite runs: one **before** any change (baseline, 290/290), one
-**after all backend changes** (302/302). Targeted runs after each fix
-batch: `test_sync_logic` 19/19, `test_ai_tasks`, `test_api` 14/14,
-`test_faqs` 5/5, `test_deals` 13/13, `test_decisions`.
+**after all backend changes** (300/300), and one final run on the
+finished tree (300/300). Targeted runs after each fix batch:
+`test_sync_logic` + `test_ai_tasks` 19/19 (combined), `test_api` 14/14,
+`test_faqs` 5/5, `test_deals` 13/13, `test_decisions` (all green).
 
 Lint: `python -m ruff check .` → **All checks passed** (one B017 in a
 new test found and fixed during the pass).
@@ -107,7 +108,7 @@ suite run, pinning fresh-DB and v5→v9 upgrade paths (indexes created,
 
 | Suite | Result |
 |---|---|
-| Backend pytest (3.13 local; 3.10–3.13 in CI) | 302/302 |
+| Backend pytest (3.13 local; 3.10–3.13 in CI) | 300/300 |
 | ruff | clean |
 | Frontend typecheck | clean |
 | Frontend vitest | 52/52 |
