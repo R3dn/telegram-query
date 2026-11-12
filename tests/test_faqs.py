@@ -1,5 +1,6 @@
 """FAQ discovery tests: clustering, human gate, review flags, API."""
 import json
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import db
@@ -137,7 +138,7 @@ def test_discover_covers_the_newest_end_of_a_busy_window(conn):
 
 
 def test_faqs_api_flow(api_client, monkeypatch):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         seed(conn)
     fake = FakeClient([answer_md("Run pg_dump nightly as shown in the replies [3].")])
     monkeypatch.setattr("ai.get_client", lambda: fake)
@@ -153,7 +154,7 @@ def test_faqs_api_flow(api_client, monkeypatch):
     assert r.status_code == 200 and r.json()["started"] is True
     assert queued == ["faq"]
     # run the pipeline synchronously (the job is intercepted above)
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         faq.discover(conn, chat_ids=[-1], days=30)
 
     lst = api_client.get("/api/faqs?status=candidate").json()

@@ -193,14 +193,14 @@ function CredentialsStep({ busy, setBusy, onDone, t, startEditing }: {
 function LoginStep({ busy, setBusy, onDone, t }: {
   busy: boolean; setBusy: (b: boolean) => void; onDone: () => void; t: TFn;
 }) {
-  const { appState, refreshAppState, toast } = useStore();
+  const { refreshAppState, toast } = useStore();
   const [stage, setStage] = useState<"phone" | "code" | "password">("phone");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const run = async (fn: () => Promise<{ stage: string; error?: string }>) => {
+  const run = async (fn: () => Promise<{ stage: string; error?: string; user?: string }>) => {
     setBusy(true);
     setError(null);
     try {
@@ -210,7 +210,9 @@ function LoginStep({ busy, setBusy, onDone, t }: {
       else if (r.stage === "password") setStage("password");
       else {
         await refreshAppState();
-        toast(t("onboarding.login.loggedInAs", { user: appState?.auth_user ?? "" }), "good");
+        // the login response carries the account label; reading it from
+        // the store snapshot here would render the pre-login value
+        toast(t("onboarding.login.loggedInAs", { user: r.user ?? "" }), "good");
         onDone();
       }
     } catch (e) {

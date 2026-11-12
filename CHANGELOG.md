@@ -3,6 +3,88 @@
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.3] - 2026-11-12
+
+Windows desktop stabilization release from the v1.0.2 → v1.0.3
+stabilization audit (`docs/engineering/windows-stabilization-audit.md`):
+the erase flow, small-screen/high-DPI window placement, and honest
+startup-failure reporting. No schema migration; existing archives
+upgrade in place.
+
+### Fixed
+- **"Erase all data" left the running app broken (data lifecycle).**
+  The erase action deletes the database file, and the UI reloads into
+  the same process ~1.5 s later — but `db.get_db()` runs its
+  one-time-per-path schema guard, so the next connection re-created an
+  *empty* file with **no tables**: readiness returned 503 and every
+  archive endpoint returned 500 until the app was restarted. The erase
+  flow now drops the guard, so the very next request rebuilds a fresh,
+  schema-complete empty archive (verified end-to-end through the API:
+  readiness 200, search functional, state reports an empty archive).
+- **"Erase all data" left the app claiming it was still configured.**
+  The wizard persists credentials via `config.update_env`, which also
+  sets them in the process environment; erasing the `.env` file alone
+  left `telegram_configured`/`ai_configured` true for the rest of the
+  session. The erase action now clears the app-managed credential
+  variables and rebuilds settings, so the process honestly reports
+  itself as unconfigured (and the wizard reopens at the credentials
+  step) without a restart.
+- **The window opened larger than the screen on small displays.**
+  pywebview's WinForms backend multiplies the requested logical size by
+  the monitor DPI and never clamps, so the 1400×900 default overflowed
+  the screen on 1366×768 laptops (both axes) and at 125–150 % scaling
+  on 1920×1080 displays (the window was physically larger than the
+  monitor). The initial window is now clamped to the primary work area
+  (taskbar excluded); any screen that fits the design size keeps it
+  unchanged.
+- **A backend that died during startup wasted the whole startup
+  timeout.** The readiness poll never checked the server thread, so a
+  uvicorn bind failure or startup crash made the user wait the full
+  60 s timeout before the error dialog. The poll now notices a dead
+  server thread within one interval and reports the honest reason
+  ("the backend exited during startup", with the real cause in the
+  log).
+- **Early startup failures killed the windowed exe silently.** Before
+  logging exists (data dir unwritable, disk full, `runtime.json` not
+  writable), any exception escaped `main()` with no console, no log
+  file, and no dialog — the app just didn't appear. Early and
+  unexpected startup failures now show the native error dialog naming
+  the data dir and write a crash dump to `%TEMP%` so the operator
+  always has evidence.
+- **The login toast showed an empty account name.** The wizard's
+  success toast read the account label from the render-time state
+  snapshot (always the pre-login value) instead of the login response
+  that carries it.
+- **The app would not open at all from the Start-Menu shortcut when the
+  repository path contains a space** (e.g. `E:\AI Projects\...`). The
+  shortcut's script path was written unquoted, so the interpreter
+  received `E:\AI` as the script name and exited instantly — no window,
+  no log, no error (a flashing error console under `python.exe`, fully
+  silent under `pythonw`). The path is now quoted and pinned by an
+  end-to-end test that launches the interpreter through a raw command
+  line exactly like the shortcut does.
+- **Clicking the app could appear to do nothing.** A second launch
+  that found a live instance with no window (a headless/test instance,
+  or one still starting or hung) exited **silently** — no window, no
+  dialog, nothing, indistinguishable from a broken app. The handoff now
+  always leaves the user with something: the focused window, or an
+  honest dialog naming the situation and how to recover.
+- **The dev Start-Menu shortcut flashed a terminal on every launch.**
+  The shortcut created by source runs targeted `python.exe` — a console
+  program — so every launch opened a black terminal that closed the
+  moment the app exited or handed off, reading exactly like a crash.
+  It now targets `pythonw.exe` (windowed, no console) when available.
+
+### Tests
+- 16 new backend regression tests (the erase/recreate lifecycle and the
+  erase-while-job-running guard, window fitting at 100–200 % scaling,
+  fail-fast startup reporting, the two startup-dialog paths, the
+  never-silent second-launch handoff ×3, and the windowed-interpreter
+  shortcut target ×3) and a new frontend suite
+  (`web/tests/onboarding.test.tsx`, verified to fail on the unfixed
+  code); full backend, frontend, desktop-E2E, and packaged-app suites
+  re-run green.
+
 ## [1.0.2] - 2026-11-12
 
 Stability and correctness release from the v1.0.1 full engineering

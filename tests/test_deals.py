@@ -1,5 +1,6 @@
 """Deals extractor tests: pipeline, validation, dedupe, status, API."""
 import json
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -264,7 +265,7 @@ def test_derived_status_matrix():
 # ---------------------------------------------------------------------------
 
 def test_deals_api_crud(api_client, monkeypatch):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         seed(conn)
     fake = FakeClient([extraction([
         {"title": "بيتزا خصم 40%", "source_indexes": [1], "status": "active",
@@ -272,7 +273,7 @@ def test_deals_api_crud(api_client, monkeypatch):
          "vendor": "Pizza", "category": "food"},
     ])])
     monkeypatch.setattr("ai.get_client", lambda: fake)
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         deals.extract(conn)
 
     r = api_client.get("/api/deals")
@@ -319,22 +320,22 @@ def test_deals_auto_toggle(api_client):
     r = api_client.get("/api/deals/settings")
     assert r.json()["auto"] is False
     assert api_client.post("/api/deals/auto", json={"enabled": True}).json()["auto"] is True
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         assert db.get_setting(conn, "deals_auto") == "1"
     api_client.post("/api/deals/auto", json={"enabled": False})
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         assert db.get_setting(conn, "deals_auto") == "0"
 
 
 def test_deals_export(api_client, monkeypatch):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         seed(conn)
     fake = FakeClient([extraction([
         {"title": "عرض بيتزا", "source_indexes": [1], "status": "active",
          "confidence": 0.9, "expires": "2030-01-01", "promo_code": "SAVE40"},
     ])])
     monkeypatch.setattr("ai.get_client", lambda: fake)
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         deals.extract(conn)
 
     r = api_client.get("/api/export/deals?format=json")

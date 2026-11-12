@@ -17,6 +17,7 @@ require an explicit confirmation token from the UI.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import config
+import db
 import desktop
 import jobs
 import migration
@@ -163,6 +165,22 @@ def erase_data(req: EraseRequest):
                 deleted.append(sub + "/")
     except migration.MigrationError as e:
         return _report_error(str(e), status=409)
+    # The UI reloads itself right after a successful erase; the SAME
+    # process must then serve a fresh, schema-complete empty archive.
+    # (a) db.get_db() runs its schema only once per path - without
+    # dropping that guard the next connection would re-create an empty
+    # file with no tables and every endpoint would 500 until restart.
+    db.forget_initialized(str(db_path))
+    # (b) "erase configuration" must be true for THIS process too: the
+    # wizard persists credentials via config.update_env, which also
+    # sets them in os.environ - drop them and rebuild settings so the
+    # app honestly reports itself as unconfigured (the wizard reopens).
+    for key in ("TG_API_ID", "TG_API_HASH", "TELEGRAM_API_ID",
+                "TELEGRAM_API_HASH", "AI_API_KEY", "AI_BASE_URL",
+                "AI_MODEL", "AI_MODEL_EXTRACT", "AI_MODEL_SYNTH",
+                "AI_MODEL_EMBED"):
+        os.environ.pop(key, None)
+    config.reload_settings()
     # Reset cached in-process state; the archive starts over on next boot.
     jobs.DIALOGS_CACHE.clear()
     import auth as tg_auth  # noqa: PLC0415

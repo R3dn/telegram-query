@@ -1,4 +1,5 @@
 """Bookmarks + notes tests: star, note, filter, search, deletion behavior."""
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import db
@@ -11,7 +12,7 @@ def iso(days_ago, hour=10):
 
 def seed(api_client):
     """Two chats, a few messages; returns (chat_id, msg_id) tuples."""
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         db.upsert_chat(conn, -1001234567890, "Dealz", "dealz", "group")
         db.upsert_chat(conn, -40, "Basic group", None, "group")
         ids = []

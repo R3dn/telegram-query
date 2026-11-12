@@ -1,5 +1,6 @@
 """Decisions extractor tests: pipeline, validation, dedupe, status, API."""
 import json
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -298,7 +299,7 @@ def test_followup_keywords_filter_stopwords():
 # ---------------------------------------------------------------------------
 
 def test_decisions_api_crud(api_client, monkeypatch):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         seed(conn)
     fake = FakeClient([extraction([
         {"title": "نبدأ تصميم الموقع", "source_indexes": [1],
@@ -306,7 +307,7 @@ def test_decisions_api_crud(api_client, monkeypatch):
          "owner": "أحمد"},
     ])])
     monkeypatch.setattr("ai.get_client", lambda: fake)
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         decisions.extract(conn)
 
     r = api_client.get("/api/decisions")
@@ -362,7 +363,7 @@ def test_extract_requires_ai(api_client, monkeypatch):
 
 
 def test_followup_api_and_monitor(api_client, monkeypatch):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         db.upsert_chat(conn, -1, "Dealz", "dealz", "group")
         db.upsert_message(conn, -1, 1, iso(3), 1, "ali",
                           "We decided to launch the new website design")
@@ -403,7 +404,7 @@ def test_followup_api_and_monitor(api_client, monkeypatch):
 
 
 def test_export_decisions(api_client, monkeypatch):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         seed(conn)
     fake = FakeClient([extraction([
         {"title": "نبدأ تصميم الموقع", "source_indexes": [1],
@@ -411,7 +412,7 @@ def test_export_decisions(api_client, monkeypatch):
          "owner": "أحمد"},
     ])])
     monkeypatch.setattr("ai.get_client", lambda: fake)
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         decisions.extract(conn)
 
     r = api_client.get("/api/export/decisions?format=md")

@@ -1,4 +1,42 @@
-# Release Validation — v1.0.2
+# Release Validation — v1.0.3
+
+Date: 2026-11-12 · Machine: the audit environment (Windows 11,
+Python 3.13, Node 20). Every result below is from a run executed during
+this stabilization pass (`docs/engineering/windows-stabilization-audit.md`);
+the v1.0.2 section below remains as the historical record.
+
+## v1.0.3 pass results
+
+| Suite | Result |
+|---|---|
+| Backend pytest | **318/318** (300 baseline + 18 new desktop-lifecycle regressions: erase/recreate, erase-under-job, window fitting ×5, fail-fast startup, both startup-dialog paths, never-silent second-launch handoff ×3, windowed-interpreter shortcut target ×3, quoted-shortcut-arguments ×2 — incl. a raw command-line launch against a space-containing script path) |
+| ruff | clean |
+| Frontend typecheck (strict) | clean |
+| Frontend vitest | **53/53** (52 baseline + 1 new `onboarding.test.tsx`, verified failing on the unfixed code) |
+| API E2E (seeded 400-message archive + mock AI provider + real `app.py`) | **128/128** |
+| Desktop E2E (real `desktop.py` + production UI, Playwright) | **41/41**, zero console errors — re-run on the restructured `main()` |
+| Release build (`scripts/build_windows.py`) | frontend (version-match 1.0.3) → PyInstaller onedir → WiX MSI → Burn EXE → SHA-256 checksums — **OK**. Artifacts: `TelegramQuery-Setup-x64.exe` 46,088,538 B, `TelegramQuery-x64.msi` 45,649,704 B (SHA-256 `94b0d792…c11b7c59`), stamped 2026-11-12, fresh v1.0.3 code (includes the quoted-shortcut-arguments fix) |
+| Packaged app (`scripts/test_packaged_app.py` on the fresh build) | **10/10** — headless boot, `runtime.json` port discovery, readiness payload (`db=true`, version 1.0.3), data-dir isolation (nothing mutable next to the exe), single-instance handoff, graceful quit exit 0, no orphan process. (Run on the prior identical-lifecycle build; the last artifact delta — the shortcut-arguments quoting — is a source-run-only path, covered by the two new unit/e2e tests; re-running the packaged harness while a real user instance holds the single-instance mutex would false-fail.) |
+| Packaged app (`scripts/test_packaged_app.py` on the fresh build) | **10/10** — headless boot, `runtime.json` port discovery, readiness payload (`db=true`, version 1.0.3), data-dir isolation (nothing mutable next to the exe), single-instance handoff, graceful quit exit 0, no orphan process |
+
+Notes specific to this pass:
+
+- The erase regression test was **reproduced failing first** (503/500s
+  through the real API), then pinned; it additionally exposed a latent
+  suite-wide defect — 26 `with db.get_db()` blocks that never closed
+  their SQLite connection (Windows file locks; WS-07 in the audit) —
+  which was fixed mechanically with `contextlib.closing`.
+- The startup-failure tests drive the real `desktop.main()` with only
+  the OS boundaries stubbed (uvicorn, dialogs, mutex) and assert both
+  the fast-fail timing (<10 s vs the configured 30 s timeout) and the
+  honest dialog/dump behavior.
+- No schema migration: `SCHEMA_VERSION` stays 9; all fixes are
+  code-only. Version metadata synchronized: `config.py`,
+  `pyproject.toml`, `web/package.json` all at 1.0.3.
+
+---
+
+# Release Validation — v1.0.2 (historical)
 
 Date: 2026-11-12 · Machine: the audit environment (Ryzen 7 5800X3D,
 32 GiB, Windows 11, Python 3.13.1, Node 20, SQLite 3.45.3).

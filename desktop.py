@@ -294,13 +294,21 @@ def _get(url: str, timeout: float = 2.0) -> tuple[bool, int, str]:
         return False, 0, str(e)
 
 
-def wait_healthy(port: int, timeout_s: float) -> tuple[bool, str]:
+def wait_healthy(port: int, timeout_s: float,
+                 server_thread: threading.Thread | None = None
+                 ) -> tuple[bool, str]:
     """Poll the readiness endpoint until it answers 200 or the deadline
-    passes. Never a blind sleep - every loop probes the real endpoint."""
+    passes. Never a blind sleep - every loop probes the real endpoint.
+    When *server_thread* is given, a thread that dies during startup is
+    reported within one poll interval instead of burning the whole
+    startup timeout (uvicorn exits on a failed bind / startup crash; the
+    health probe alone would just time out)."""
     url = f"http://127.0.0.1:{port}/api/health/ready"
     deadline = time.monotonic() + timeout_s
     last_err = "not reachable"
     while time.monotonic() < deadline and not QUIT.is_set():
+        if server_thread is not None and not server_thread.is_alive():
+            return False, "the backend process exited during startup"
         ok, _status, err = _get(url)
         if ok:
             return True, ""
@@ -331,9 +339,12 @@ def run_app_window(url: str,
     # text_select=True: the default would inject a global user-select
     # none - unacceptable for an archive users copy from. The app's own
     # CSS governs selection instead.
+    # fit_window_size: never larger than the primary work area (small
+    # laptops, 125-150% scaling); pywebview does not clamp itself.
+    win_w, win_h = fit_window_size(WINDOW_SIZE, WINDOW_MIN_SIZE)
     window = webview.create_window(
         WINDOW_TITLE, url,
-        width=WINDOW_SIZE[0], height=WINDOW_SIZE[1],
+        width=win_w, height=win_h,
         min_size=WINDOW_MIN_SIZE,
         background_color=WINDOW_BACKGROUND,
         text_select=True)
@@ -417,6 +428,34 @@ def _tray_icon_image():
     return img
 
 
+def _windowed_interpreter(exe: str | None = None) -> str:
+    """Interpreter for the Start-Menu shortcut: ``pythonw.exe`` when it
+    exists next to *exe* (default: this interpreter).
+
+    ``python.exe`` is a console program - a shortcut targeting it
+    flashes a black terminal window on every launch, which closes the
+    moment the process exits (or hands off to another instance), and
+    looks exactly like "the app started and died". ``pythonw.exe`` runs
+    the same script windowed (desktop.py gives it devnull-backed
+    streams via ensure_streams). Frozen apps have no pythonw next to
+    the exe and keep their own exe as the target."""
+    exe_path = Path(exe or sys.executable)
+    windowed = exe_path.with_name("pythonw.exe")
+    return str(windowed) if windowed.exists() else str(exe_path)
+
+
+def _shortcut_arguments() -> str:
+    """The script path for the Start-Menu shortcut, QUOTED.
+
+    Windows passes the Arguments field verbatim on the command line; a
+    repo path containing spaces (e.g. ``E:\\AI Projects\\...``) must
+    reach the interpreter as ONE argv token. Unquoted, pythonw opened
+    ``E:\\AI`` as the script and exited instantly - the shortcut click
+    did nothing, with no console and no error (python.exe at least
+    flashed the error in a closing console)."""
+    return f'"{Path(__file__).resolve()}"'
+
+
 def _ensure_start_menu_shortcut(app_user_model_id: str,
                                 icon_path: str) -> None:
     """Write/update a Start-Menu shortcut for Telegram Query.
@@ -447,10 +486,13 @@ def _ensure_start_menu_shortcut(app_user_model_id: str,
             sc = shell.CreateShortCut(str(shortcut_path))
             current_target = sc.Targetpath
             current_icon = sc.IconLocation
+            # WSH cannot read back the AppUserModelID (that is why the
+            # propsys patch below exists) - compare only what it CAN
+            # read: target + icon. The target check makes the one-time
+            # python.exe -> pythonw.exe migration rewrite the shortcut.
             if (current_target and
-                sys.executable.upper() in current_target.upper() and
-                current_icon and icon_path in current_icon and
-                app_user_model_id in (sc.WindowStyle or "")):  # type: ignore[attr-defined]
+                _windowed_interpreter().upper() in current_target.upper()
+                and current_icon and icon_path in current_icon):
                 needs_update = False
         except Exception:
             pass
@@ -458,8 +500,12 @@ def _ensure_start_menu_shortcut(app_user_model_id: str,
     if needs_update:
         shell = win32com.client.Dispatch("WScript.Shell")
         sc = shell.CreateShortCut(str(shortcut_path))
-        sc.Targetpath = sys.executable
-        sc.Arguments = str(Path(__file__).resolve())
+        # pythonw (never python.exe): the shortcut must not flash a
+        # console window on every launch
+        sc.Targetpath = _windowed_interpreter()
+        # quoted: a script path with spaces is ONE argv token (see
+        # _shortcut_arguments) - unquoted it never even started
+        sc.Arguments = _shortcut_arguments()
         sc.WorkingDirectory = str(Path(__file__).resolve().parent)
         sc.IconLocation = icon_path + ",0"
         sc.Description = "Telegram Query"
@@ -683,6 +729,62 @@ def _startup_timeout() -> float:
 
 
 # ---------------------------------------------------------------------------
+# Initial window placement (small screens / high-DPI)
+# ---------------------------------------------------------------------------
+
+_SM_CXFULLSCREEN = 16               # Win32: work-area width, primary screen
+_SM_CYFULLSCREEN = 17               # Win32: work-area height, primary screen
+
+
+def _primary_work_area() -> tuple[int, int] | None:
+    """(width, height) of the primary monitor's work area in physical
+    pixels (excludes the taskbar), or None off-Windows / on failure."""
+    if sys.platform != "win32":
+        return None
+    try:
+        user32 = ctypes.windll.user32
+        w = user32.GetSystemMetrics(_SM_CXFULLSCREEN)
+        h = user32.GetSystemMetrics(_SM_CYFULLSCREEN)
+        return (w, h) if w > 0 and h > 0 else None
+    except Exception:                     # noqa: BLE001 - metrics are optional
+        return None
+
+
+def _primary_scale() -> float:
+    """DPI scale of the primary monitor (logical -> physical px)."""
+    if sys.platform != "win32":
+        return 1.0
+    try:
+        return max(1.0, ctypes.windll.user32.GetDpiForSystem() / 96.0)
+    except Exception:                     # noqa: BLE001
+        return 1.0
+
+
+def fit_window_size(default: tuple[int, int],
+                    minimum: tuple[int, int]) -> tuple[int, int]:
+    """Clamp the initial window to the primary work area.
+
+    pywebview's WinForms backend multiplies the requested logical size
+    by the monitor DPI and never clamps to the screen, so the documented
+    1400x900 default overflowed the window on 1366x768 laptops (either
+    axis) and at 125-150% scaling on 1920x1080 displays (the window is
+    physically larger than the screen). The clamped window still keeps
+    the design size on any screen that fits it."""
+    wa = _primary_work_area()
+    if wa is None:
+        return default
+    scale = _primary_scale()
+    max_w = int(wa[0] / scale)
+    max_h = int(wa[1] / scale)
+    w = min(default[0], max_w)
+    h = min(default[1], max_h)
+    # never shrink below the usable minimum unless the screen is even
+    # smaller than the minimum itself (then the work area wins)
+    return (max(w, min(minimum[0], max_w)),
+            max(h, min(minimum[1], max_h)))
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -693,11 +795,63 @@ def _report_server_death() -> None:
         f"again.\n\nDetails are in the log:\n{LOG_FILE}")
 
 
+def _startup_crash_dump(exc: BaseException) -> str:
+    """Best-effort crash dump when even the log file is unavailable
+    (unwritable data dir, full disk): %TEMP% keeps operator evidence.
+    Returns the dump path, or '' when even that failed."""
+    try:
+        import tempfile
+        import traceback
+        path = (Path(tempfile.gettempdir())
+                / "TelegramQuery-startup-error.log")
+        path.write_text(
+            f"Telegram Query {config.__version__} failed to start\n"
+            f"pid={os.getpid()} data_dir={config.DATA_DIR}\n"
+            f"{traceback.format_exc()}",
+            encoding="utf-8", errors="replace")
+        return str(path)
+    except Exception:                     # noqa: BLE001 - best effort
+        return ""
+
+
+def _report_early_crash(exc: BaseException) -> None:
+    """Startup failed before logging was up: the native dialog is the
+    only honest report left, plus a %TEMP% dump."""
+    dump = _startup_crash_dump(exc)
+    show_error(
+        "Startup failed",
+        "Telegram Query could not create its data folder or log file:\n"
+        f"{config.DATA_DIR}\n\n"
+        f"({type(exc).__name__}: {exc})\n\n"
+        "Free up disk space or check the folder's permissions, then "
+        "start again."
+        + (f"\n\nDetails were written to:\n{dump}" if dump else ""))
+
+
 def main(argv: list[str] | None = None) -> int:
     global APP_URL
     ensure_streams()
-    configure_logging()
+    try:
+        configure_logging()
+    except Exception as e:                 # noqa: BLE001 - data dir unusable
+        # windowed app: without this dialog the exe would die silently
+        # (no console, no log file, nothing on screen)
+        _report_early_crash(e)
+        return 1
     install_excepthooks()
+    try:
+        return _run(argv)
+    except Exception:                      # noqa: BLE001 - reported, never silent
+        log.exception("desktop startup failed")
+        show_error(
+            "Startup failed",
+            "The application failed to start.\n\n"
+            f"Details are in the log:\n{LOG_FILE}")
+        return 1
+
+
+def _run(argv: list[str] | None = None) -> int:
+    global APP_URL
     argv = list(sys.argv[1:] if argv is None else argv)
     mode = ui_mode(argv)
     log.info("Telegram Query %s (desktop mode, ui=%s, pid %s, data dir %s)",
@@ -755,8 +909,18 @@ def main(argv: list[str] | None = None) -> int:
     server_thread.start()
     _RUNNING.set()
 
-    healthy, err = wait_healthy(port, _startup_timeout())
+    healthy, err = wait_healthy(port, _startup_timeout(), server_thread)
     if not healthy:
+        if err == "the backend process exited during startup":
+            log.error("backend exited during startup - see the log above")
+            QUIT.set()
+            server.should_exit = True
+            server_thread.join(timeout=10)
+            show_error(
+                "Startup failed",
+                "The application backend exited during startup.\n\n"
+                f"Details are in the log:\n{LOG_FILE}")
+            return 1
         log.error("backend did not become ready in %.0fs: %s",
                   _startup_timeout(), err)
         QUIT.set()
@@ -874,15 +1038,31 @@ def focus_existing(quiet: bool = False) -> bool:
 
 
 def _surface_running_instance(port: int) -> None:
-    """Focus the running instance's window. If it has no window yet
-    (still coming up) the second launch simply does nothing - the first
-    instance will appear when ready."""
-    if read_runtime_ui() == UI_WINDOW:
-        if _focus_existing_window():
-            return
-    # Quietly succeed: the instance is alive, the window will appear
-    # when it finishes starting.
-    return
+    """Focus the running instance's window - and never exit silently.
+
+    A second launch that finds the instance alive must leave the user
+    with something: the focused window, or an honest dialog. Exiting
+    quietly is indistinguishable from "the app is broken" (the click
+    appears to do nothing; with a console-mode launcher the terminal
+    flashes and closes)."""
+    ui = read_runtime_ui()
+    if ui == UI_WINDOW and _focus_existing_window():
+        return
+    if ui == UI_NONE:
+        show_error(
+            "Telegram Query is already running",
+            "Another Telegram Query instance is running headless on "
+            f"this machine (port {port}; a test or background run).\n\n"
+            "Close it - end the \"python.exe\" process running "
+            "desktop.py in Task Manager - then start again.")
+    else:
+        show_error(
+            "Telegram Query is already running",
+            "Another Telegram Query instance is running, but its window "
+            "did not appear within 10 seconds - it may still be "
+            "starting or have stopped responding.\n\n"
+            "If nothing appears, close Telegram Query from the "
+            "notification area (or Task Manager) and start again.")
 
 
 if __name__ == "__main__":

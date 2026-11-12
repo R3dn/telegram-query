@@ -1,4 +1,6 @@
 """Telegram deep-link tests: verified formats, no fabricated URLs."""
+from contextlib import closing
+
 import db
 
 
@@ -27,7 +29,7 @@ def test_missing_ids_are_safe():
 
 
 def test_api_decorates_rows(api_client):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         db.upsert_chat(conn, -1001234567890, "Dealz", "dealz", "group")
         db.upsert_chat(conn, -1009999999999, "Private corner", None, "channel")
         db.upsert_chat(conn, -77, "Old basic group", None, "group")

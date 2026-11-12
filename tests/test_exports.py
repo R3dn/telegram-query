@@ -1,4 +1,5 @@
 """Export tests: Markdown + JSON, UTF-8/Arabic, citations, no secrets."""
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import db
@@ -9,7 +10,7 @@ def iso(days_ago):
 
 
 def seed(api_client):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         db.upsert_chat(conn, -1001234567890, "عروض", "offers", "group")
         db.upsert_message(conn, -1001234567890, 1, iso(1), 1, "سعيد",
                           "عرض خاص اليوم فقط")

@@ -599,6 +599,18 @@ def init_db(path: str = None):
     conn.close()
 
 
+def forget_initialized(path: str = None) -> None:
+    """Drop the one-time schema guard for *path* (default: the app DB).
+
+    get_db() creates the schema only the first time it sees a database
+    path; after the explicit erase action deletes the file mid-process,
+    the stale guard would make the next connection re-create an EMPTY
+    file with no tables - every endpoint would 500 until a restart.
+    Called by api/data.py after a successful erase so the very next
+    request builds a fresh, schema-complete empty archive."""
+    _INITIALIZED.discard(str(Path(path) if path else DB_PATH))
+
+
 # ---------------------------------------------------------------------------
 # App settings (scheduler state, reindex flags, future feature settings)
 # ---------------------------------------------------------------------------

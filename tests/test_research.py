@@ -1,6 +1,7 @@
 """Research briefs tests: generation, citation validation, versions,
 staleness, API."""
 import json
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -158,7 +159,7 @@ def test_too_few_sources_saves_nothing(conn, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_brief_api_flow(api_client, monkeypatch):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         seed(conn)
 
     queued = []
@@ -181,7 +182,7 @@ def test_brief_api_flow(api_client, monkeypatch):
     fake = FakeClient([keywords(["kubernetes migration"]),
                        brief_md("## Summary\nThe kubernetes migration is summarized with evidence [1].")])
     monkeypatch.setattr("ai.get_client", lambda: fake)
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         research.generate(conn, brief_id)
 
     r = api_client.get(f"/api/briefs/{brief_id}")

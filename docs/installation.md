@@ -30,7 +30,10 @@ What to expect on first launch:
 - The app binds to `127.0.0.1` only — it is reachable from your machine
   and nothing else. If port 8000 is busy it picks a free one; the
   window still opens at the right address.
-- One instance at a time: a second launch focuses the running window.
+- One instance at a time: a second launch focuses the running window —
+  and if the running instance has no window to focus (a stuck
+  background instance), you get a clear message naming it and how to
+  close it, never a silent no-op.
 - The server API starts, the health check passes, and only then does
   the window appear — a slow disk never produces a blank window.
 - Close the window or use the in-app Exit action — either way the

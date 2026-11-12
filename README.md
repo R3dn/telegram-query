@@ -41,7 +41,10 @@ Telegram session never leave it.
   to the **system tray** (left-click the tray icon to restore, right-
   click for Open/Exit). A missing WebView2 runtime shows a clear error
   dialog with the download link instead of a broken window — there is
-  no browser mode.
+  no browser mode. The window fits your screen (small laptops and
+  125–150 % scaling included), startup failures always show an honest
+  error dialog with a log/dump location, and the in-app "erase all
+  data" restarts you cleanly in the same session.
 - **Fast bilingual search** — FTS5 trigram index with Arabic/English
   normalization: diacritics, alef/ya variants, taa marbuta, plus extended
   rules — Arabic-Indic digits (٢٥→25), chat elongation (هااااي→هاي),

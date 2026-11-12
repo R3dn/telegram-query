@@ -1,5 +1,45 @@
 # Release notes
 
+## 1.0.3 (2026-11-12)
+
+Windows desktop stabilization release. No schema migration — run the
+installer over the old one; your archive, session, and settings survive
+by design.
+
+- **"Erase all data" now actually restarts the app cleanly**: erasing
+  used to leave the running backend without a usable database — every
+  view failed until the app was manually restarted — and the app kept
+  claiming Telegram/AI were configured. Erase now rebuilds a fresh
+  empty archive immediately and honestly reports itself as unconfigured,
+  so the setup wizard reopens by itself.
+- **The window fits your screen**: on 1366×768 laptops and at 125–150 %
+  display scaling, the app window opened larger than the screen and was
+  clipped. The initial window is now sized to your primary display's
+  work area (the design size is kept whenever it fits).
+- **Startup failures are reported, never silent**: if the backend
+  cannot start (or the data folder is unwritable / the disk is full),
+  the app now shows a clear error dialog within moments instead of
+  either stalling for a minute or disappearing without a trace, and it
+  writes a crash dump you can attach to a bug report.
+- **Fixed: the app would not open from the Start-Menu shortcut at all**
+  when the program folder contains a space in its path (the shortcut
+  passed the script path unquoted, so the app exited before it could
+  even show an error). If you hit this, one more click after updating
+  opens normally.
+- **"Clicking the app does nothing" is now impossible**: when another
+  Telegram Query instance is already running but has no window to
+  focus (a background/test instance, or one still starting or hung),
+  a new click used to exit silently. It now either focuses the running
+  window or shows a clear message explaining what's running and how to
+  close it.
+- The dev Start-Menu shortcut no longer flashes a console window on
+  every launch (it now runs the windowed Python interpreter).
+- The first-login toast now shows the account name.
+
+Full details: `docs/engineering/windows-stabilization-audit.md` (the
+complete audit: findings, fixes, and verification),
+`docs/engineering/release-validation.md` (test results).
+
 ## 1.0.2 (2026-11-12)
 
 Stability and correctness release from the full v1.0.1 engineering

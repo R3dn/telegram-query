@@ -1,5 +1,6 @@
 """Evidence Explorer tests: the unified reverse-citation lookup."""
 import json
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import db
@@ -98,7 +99,7 @@ def seed_all_kinds(conn):
 
 
 def test_evidence_unifies_all_citations(api_client):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         seed_all_kinds(conn)
 
     r = api_client.get("/api/evidence", params={"chat_id": -1, "msg_id": 1})
@@ -124,7 +125,7 @@ def test_evidence_unifies_all_citations(api_client):
 
 
 def test_evidence_followup_and_thread(api_client):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         seed_all_kinds(conn)
         # make msg 2 a direct reply to msg 1 (reply_to captured v0.5+)
         conn.execute("UPDATE messages SET reply_to=1 WHERE chat_id=-1 "
@@ -146,7 +147,7 @@ def test_evidence_followup_and_thread(api_client):
 
 
 def test_evidence_404_and_empty(api_client):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         db.upsert_chat(conn, -1, "Dealz", "dealz", "group")
         db.upsert_message(conn, -1, 1, iso(1), 1, "ali", "plain message")
         conn.commit()

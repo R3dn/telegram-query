@@ -1,5 +1,6 @@
 """Digests tests: generation, citation validation, reuse, schedules, API."""
 import json
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -140,7 +141,7 @@ def test_due_schedules_logic(conn):
 
 
 def test_digests_api(api_client, monkeypatch):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         seed(conn)
     fake = FakeClient([digest_md("## Top discussions\nMigration update [1] and more [2] to report.")])
     monkeypatch.setattr("ai.get_client", lambda: fake)
@@ -153,7 +154,7 @@ def test_digests_api(api_client, monkeypatch):
     assert len(api_client.get("/api/digests/schedules").json()) == 1
 
     # on-demand generation runs the real pipeline (mocked provider)
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         result = digests.generate(conn, chat_ids=[-1], schedule_id=sid)
     did = result["id"]
 

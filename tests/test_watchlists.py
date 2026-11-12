@@ -1,4 +1,5 @@
 """Watchlists tests: deterministic matching, watermarks, dedupe, API."""
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import db
@@ -136,13 +137,13 @@ def test_watchlists_api(api_client):
     # delete watchlist cascades its alerts
     api_client.delete(f"/api/watchlists/{wid}")
     assert api_client.get("/api/watchlists").json() == []
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         assert conn.execute("SELECT COUNT(*) c FROM alerts"
                             ).fetchone()["c"] == 0
 
 
 def test_check_now_backfill_window(api_client):
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         seed(conn)
     api_client.post("/api/watchlists", json={
         "name": "k8s", "terms": ["kubernetes"], "chat_ids": []})
@@ -150,7 +151,7 @@ def test_check_now_backfill_window(api_client):
     assert api_client.post("/api/watchlists/check",
                            json={"backfill_days": 0}).json()["matches"] == 2
     # pretend a later message arrived
-    with db.get_db() as conn:
+    with closing(db.get_db()) as conn:
         db.upsert_message(conn, -1, 5, iso(0), 1, "z",
                           "kubernetes again and again")
         conn.commit()
