@@ -49,6 +49,16 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
 
   const refreshDialogs = () => void loadDialogs(true);
 
+  // v1.0.2: the dialogs polling loop keeps running after the modal is
+  // closed (jobStatus every 1.3s until any job finishes, plus state
+  // writes to an unmounted component). aborted is set by the unmount
+  // effect and checked at every loop step.
+  const dialogsAborted = useRef(false);
+  useEffect(() => {
+    dialogsAborted.current = false;
+    return () => { dialogsAborted.current = true; };
+  }, []);
+
   async function loadDialogs(force: boolean) {
     try {
       if (!force) {
@@ -61,7 +71,9 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
       setListing({ state: "waiting", note: t("system.mm.loadingGroups") });
       let tries = 0;
       while (true) {
+        if (dialogsAborted.current) return;
         const status = await api.jobStatus();
+        if (dialogsAborted.current) return;
         if (status.running || status.queued.length > 0) {
           setListing({
             state: "waiting",
@@ -73,6 +85,7 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
           continue;
         }
         const r0 = await api.dialogsGet();
+        if (dialogsAborted.current) return;
         if (r0.ready && r0.dialogs) {
           setDialogs(r0.dialogs);
           break;
@@ -89,7 +102,7 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
     } catch (e) {
       toast((e as Error).message, "err");
     } finally {
-      setListing({ state: "idle" });
+      if (!dialogsAborted.current) setListing({ state: "idle" });
     }
   }
 
@@ -244,7 +257,14 @@ export function ManageGroups({ onClose }: { onClose: () => void }) {
             <pre className="mm-log">{jobs?.log?.split("\n").slice(-4).join("\n") || t("system.starting")}</pre>
             {jobs?.running && (
               <button className="btn danger sm" style={{ marginTop: 8 }}
-                onClick={async () => { await api.jobStop(false); toast(t("system.mm.stoppingList"), "info"); }}>
+                onClick={() => void (async () => {
+                  try {
+                    await api.jobStop(false);
+                    toast(t("system.mm.stoppingList"), "info");
+                  } catch (e) {
+                    toast((e as Error).message, "err");   // v1.0.2: no silent rejection
+                  }
+                })()}>
                 <Ic.CircleOff size={13} /> {t("system.jobs.stopCurrent")}
               </button>
             )}

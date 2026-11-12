@@ -2,7 +2,7 @@
  *  communities talk about - brands, products, orgs, projects, places.
  *  Every mention links to its original message; the gazetteer is
  *  human-controlled (add / rename / merge / ignore). NEVER people. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
 import { useLang } from "../i18n";
@@ -14,7 +14,8 @@ import { EmptyState } from "./EmptyState";
 type TFunc = ReturnType<typeof useLang>["t"];
 
 export function EntityView() {
-  const { appState, toast, select, setRightTab, selection } = useStore();
+  const { appState, toast, select, setRightTab, selection,
+          evidenceFocus, setEvidenceFocus } = useStore();
   const { t } = useLang();
   const [rows, setRows] = useState<Entity[] | null>(null);
   const [settings, setSettings] = useState<EntitiesSettings | null>(null);
@@ -22,13 +23,20 @@ export function EntityView() {
   const [sort, setSort] = useState<"recent" | "mentions">("recent");
   const [open, setOpen] = useState<EntityDetail | null>(null);
   const [adding, setAdding] = useState(false);
+  // v1.0.2: ordering guard + debounce - every keystroke fired a request
+  // and a slow older response could overwrite a newer one.
+  const loadSeq = useRef(0);
 
   const load = async (query = q) => {
+    const seq = ++loadSeq.current;
     try {
-      setRows(await api.entitiesList({ q: query, sort, groups: [...selection] }));
+      const r = await api.entitiesList({ q: query, sort, groups: [...selection] });
+      if (seq === loadSeq.current) setRows(r);
     } catch (e) {
-      toast((e as Error).message, "err");
-      setRows([]);
+      if (seq === loadSeq.current) {
+        toast((e as Error).message, "err");
+        setRows([]);
+      }
     }
   };
 
@@ -38,6 +46,13 @@ export function EntityView() {
     void api.entitiesSettings().then(setSettings).catch(() => {});
   }, []);
 
+  // debounced search (BookmarksView pattern)
+  useEffect(() => {
+    const timer = setTimeout(() => void load(q), 250);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
   const openEntity = async (id: number) => {
     try {
       setOpen(await api.entityGet(id, 30, 0));
@@ -45,6 +60,17 @@ export function EntityView() {
       toast((e as Error).message, "err");
     }
   };
+
+  // v1.0.2: Evidence Explorer jump - open the referenced entity's
+  // detail instead of only landing on the list.
+  useEffect(() => {
+    if (evidenceFocus?.kind === "entity") {
+      const id = evidenceFocus.id;
+      setEvidenceFocus(null);
+      void openEntity(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidenceFocus]);
 
   const openMessage = (m: { chat_id: number; msg_id: number }) => {
     void (async () => {
@@ -104,7 +130,7 @@ export function EntityView() {
         </span>
         <span style={{ flex: 1 }} />
         <input className="input" style={{ maxWidth: 180 }} placeholder={t("entities.searchPlaceholder")}
-               value={q} onChange={(e) => { setQ(e.target.value); void load(e.target.value); }} />
+               value={q} onChange={(e) => setQ(e.target.value)} />
         <select className="input" style={{ maxWidth: 130 }} value={sort}
                 onChange={(e) => setSort(e.target.value as "recent" | "mentions")}>
           <option value="recent">{t("entities.sort.recent")}</option>

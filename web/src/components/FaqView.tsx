@@ -3,7 +3,7 @@
 An FAQ is never trusted automatically: discovery proposes candidates, and a
 human approves. New evidence against an approved answer flags it for
 review instead of silently replacing it. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
 import { useLang } from "../i18n";
@@ -24,23 +24,53 @@ const EMPTY_KEY: Record<(typeof TABS)[number] | "all", string> = {
 };
 
 export function FaqView() {
-  const { toast, appState, groups, selection, toggleGroup, jobs } = useStore();
+  const { toast, appState, groups, selection, toggleGroup, jobs,
+          evidenceFocus, setEvidenceFocus } = useStore();
   const { t } = useLang();
   const [tab, setTab] = useState<(typeof TABS)[number] | "all">("candidate");
   const [rows, setRows] = useState<Faq[] | null>(null);
   const [open, setOpen] = useState<Faq | null>(null);
   const [editing, setEditing] = useState(false);
   const [answer, setAnswer] = useState("");
+  const loadSeq = useRef(0);   // v1.0.2: last load wins
 
   const load = async (s = tab) => {
+    const seq = ++loadSeq.current;
     try {
-      setRows(await api.faqs({ status: s === "all" ? undefined : s }));
+      const list = await api.faqs({ status: s === "all" ? undefined : s });
+      if (seq === loadSeq.current) setRows(list);
     } catch (e) {
-      toast((e as Error).message, "err");
-      setRows([]);
+      if (seq === loadSeq.current) {
+        toast((e as Error).message, "err");
+        setRows([]);
+      }
     }
   };
   useEffect(() => { void load(tab); }, [tab]);
+
+  // v1.0.2: Evidence Explorer jump - open the referenced FAQ. It may
+  // live under a different status tab, so fetch the full list, display
+  // it, and open the referenced row.
+  useEffect(() => {
+    if (evidenceFocus?.kind === "faq") {
+      const id = evidenceFocus.id;
+      setEvidenceFocus(null);
+      setTab("all");
+      void (async () => {
+        try {
+          const all = await api.faqs({});   // unfiltered
+          setRows(all);
+          const f = all.find((x) => x.id === id);
+          if (f) {
+            setOpen(f);
+            setEditing(false);
+            setAnswer(f.answer_md ?? "");
+          }
+        } catch { /* the tab effect already reloaded the list */ }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidenceFocus]);
 
   const lastDone = jobs?.last_done;
   useEffect(() => {
@@ -60,12 +90,16 @@ export function FaqView() {
   };
 
   const patch = async (id: number, p: Record<string, unknown>, msg: string) => {
+    // v1.0.2: report success - callers must not close the editor (and
+    // discard the typed answer) when the save failed.
     try {
       await api.faqPatch(id, p);
       toast(msg, "good");
       await load();
+      return true;
     } catch (e) {
       toast((e as Error).message, "err");
+      return false;
     }
   };
 
@@ -176,8 +210,8 @@ export function FaqView() {
                   <div className="settings-actions" style={{ marginTop: 8 }}>
                     <button className="btn primary sm"
                             onClick={() => void (async () => {
-                              await patch(open.id, { answer_md: answer }, t("faqs.answerSaved"));
-                              setOpen(null);
+                              const ok = await patch(open.id, { answer_md: answer }, t("faqs.answerSaved"));
+                              if (ok) setOpen(null);   // keep the typed answer on failure
                             })()}>
                       <Ic.Save size={13} /> {t("faqs.saveAnswer")}
                     </button>
@@ -216,8 +250,8 @@ export function FaqView() {
                     </button>
                     <button className="btn ghost sm"
                             onClick={() => void (async () => {
-                              await patch(open.id, { status: "outdated" }, t("faqs.markedOutdated"));
-                              setOpen(null);
+                              const ok = await patch(open.id, { status: "outdated" }, t("faqs.markedOutdated"));
+                              if (ok) setOpen(null);
                             })()}>
                       <Ic.Clock size={13} /> {t("faqs.markOutdated")}
                     </button>

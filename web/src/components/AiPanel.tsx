@@ -117,8 +117,8 @@ export function AiPanel() {
 
       {(chat.length > 0 || busy) && (
         <div className="ai-chat">
-          {chat.map((turn, i) => (
-            <TurnView key={i} turn={turn} onOpenSource={openSource}
+          {chat.map((turn) => (
+            <TurnView key={turn.at} turn={turn} onOpenSource={openSource}
                       providerHost={appState?.ai_provider_host}
                       providerModel={appState?.ai_model} />
           ))}

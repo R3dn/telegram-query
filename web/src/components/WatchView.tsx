@@ -3,7 +3,7 @@
 Watchlists are DETERMINISTIC: matching runs on the same normalized text as
 search, right after each sync - the AI provider is never involved, so
 monitoring works (and costs nothing) even without one. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
 import { useLang } from "../i18n";
@@ -166,7 +166,9 @@ function WatchModal({ w, groups, onClose, onSaved, t }: {
       terms: terms.split(",").map((x) => x.trim()).filter(Boolean),
       exclude_terms: excludes.split(",").map((x) => x.trim()).filter(Boolean),
       chat_ids: [...scope],
-      enabled: true,
+      // v1.0.2: editing a PAUSED watchlist must not silently re-enable
+      // it (the old hard-coded true re-armed matching on every edit)
+      enabled: w ? w.enabled : true,
     };
     if (!body.name || body.terms.length === 0) {
       toast(t("watch.needNameAndTerm"), "err");
@@ -230,20 +232,37 @@ function WatchModal({ w, groups, onClose, onSaved, t }: {
 }
 
 export function AlertsView() {
-  const { toast, select, setRightTab, jobs } = useStore();
+  const { toast, select, setRightTab, jobs, evidenceFocus, setEvidenceFocus }
+    = useStore();
   const { t } = useLang();
   const [state, setState] = useState<"new" | "read" | "archived">("new");
   const [rows, setRows] = useState<Alert[] | null>(null);
+  const loadSeq = useRef(0);   // v1.0.2: last tab wins on slow responses
 
   const load = async (s = state) => {
+    const seq = ++loadSeq.current;
     try {
-      setRows(await api.alerts({ state: s }));
+      const list = await api.alerts({ state: s });
+      if (seq === loadSeq.current) setRows(list);
     } catch (e) {
-      toast((e as Error).message, "err");
-      setRows([]);
+      if (seq === loadSeq.current) {
+        toast((e as Error).message, "err");
+        setRows([]);
+      }
     }
   };
   useEffect(() => { void load(state); }, [state]);
+
+  // v1.0.2: Evidence Explorer jump - land on the tab that actually
+  // holds the referenced alert (it may be read or archived), instead
+  // of always landing on "new" where it is not visible.
+  useEffect(() => {
+    if (evidenceFocus?.kind === "alert") {
+      setState((s) => (s === "new" ? "read" : s));
+      setEvidenceFocus(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidenceFocus]);
 
   const lastDone = jobs?.last_done;
   useEffect(() => {

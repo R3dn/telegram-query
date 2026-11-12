@@ -112,13 +112,14 @@ export const api = {
     req<Message>(`/api/message/${chatId}/${msgId}`),
   search: (p: {
     q: string; groups: number[]; sender?: string; from?: string; to?: string;
-    limit?: number; bookmarked?: boolean; signal?: AbortSignal;
+    limit?: number; media?: string; bookmarked?: boolean; signal?: AbortSignal;
   }): Promise<Message[]> => {
     const q = new URLSearchParams({ q: p.q });
     if (p.groups.length) q.set("groups", p.groups.join(","));
     if (p.sender) q.set("sender", p.sender);
     if (p.from) q.set("from_", p.from);
     if (p.to) q.set("to", p.to);
+    if (p.media) q.set("media", p.media);
     if (p.bookmarked) q.set("bookmarked", "true");
     q.set("limit", String(p.limit ?? 200));
     return req<Message[]>(`/api/search?${q}`, { signal: p.signal });

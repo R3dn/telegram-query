@@ -118,6 +118,18 @@ function RightPanel() {
     parseInt(localStorage.getItem("tgq-right-w") ?? "360", 10),
   );
   const dragging = useRef(false);
+  // v1.0.2: react to window resizes. A once-per-render matchMedia check
+  // went stale after resizing the desktop window across the 1100px
+  // breakpoint (panel mode + mobile nav never re-evaluated).
+  const [narrow, setNarrow] = useState(
+    () => window.matchMedia("(max-width: 1100px)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1100px)");
+    const upd = () => setNarrow(mq.matches);
+    mq.addEventListener("change", upd);
+    return () => mq.removeEventListener("change", upd);
+  }, []);
 
   const onPointerDown = (e: React.PointerEvent) => {
     dragging.current = true;
@@ -146,8 +158,6 @@ function RightPanel() {
       window.removeEventListener("pointerup", up);
     };
   }, [width]);
-
-  const narrow = window.matchMedia("(max-width: 1100px)").matches;
 
   return (
     <aside

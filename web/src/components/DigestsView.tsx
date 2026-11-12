@@ -3,7 +3,7 @@
 Every factual item in a digest cites archived messages; empty sections are
 dropped by prompt contract and unresolvable citations are stripped on the
 backend. Unchanged periods are never re-sent to the provider. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
 import { useLang } from "../i18n";
@@ -16,12 +16,18 @@ import { Modal } from "./Modal";
 type T = ReturnType<typeof useLang>["t"];
 
 export function DigestsView() {
-  const { groups, toast, appState, jobs, selection, toggleGroup } = useStore();
+  const { groups, toast, appState, jobs, selection, toggleGroup,
+          evidenceFocus, setEvidenceFocus } = useStore();
   const { t } = useLang();
   const [schedules, setSchedules] = useState<DigestSchedule[]>([]);
   const [digests, setDigests] = useState<Digest[] | null>(null);
   const [open, setOpen] = useState<Digest | null>(null);
   const [schedOpen, setSchedOpen] = useState(false);
+  // v1.0.2: the chosen daily/weekly option was discarded - the modal
+  // always opened as "daily" and an unnoticed save scheduled the wrong
+  // frequency. The selection now seeds the modal.
+  const [newFreq, setNewFreq] = useState<"daily" | "weekly">("daily");
+  const openSeq = useRef(0);
 
   const load = async () => {
     try {
@@ -57,12 +63,25 @@ export function DigestsView() {
   };
 
   const openDigest = async (id: number) => {
+    const seq = ++openSeq.current;   // v1.0.2: last click wins
     try {
-      setOpen(await api.digestGet(id));
+      const d = await api.digestGet(id);
+      if (seq === openSeq.current) setOpen(d);
     } catch (e) {
-      toast((e as Error).message, "err");
+      if (seq === openSeq.current) toast((e as Error).message, "err");
     }
   };
+
+  // v1.0.2: Evidence Explorer jump - open the referenced digest instead
+  // of only landing on the list.
+  useEffect(() => {
+    if (evidenceFocus?.kind === "digest") {
+      const id = evidenceFocus.id;
+      setEvidenceFocus(null);
+      void openDigest(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidenceFocus]);
 
   const aiOn = appState?.ai_configured;
 
@@ -74,7 +93,12 @@ export function DigestsView() {
         <span style={{ flex: 1 }} />
         <select className="input dg-sched-select" value=""
                 title={t("digests.newSchedule")}
-                onChange={(e) => { if (e.target.value) setSchedOpen(true); }}>
+                onChange={(e) => {
+                  if (e.target.value === "weekly") setNewFreq("weekly");
+                  else if (e.target.value === "daily") setNewFreq("daily");
+                  if (e.target.value) setSchedOpen(true);
+                  e.currentTarget.value = "";   // reset for the next pick
+                }}>
           <option value="">{t("digests.newScheduleOption")}</option>
           <option value="daily">{t("digests.newDaily")}</option>
           <option value="weekly">{t("digests.newWeekly")}</option>
@@ -219,19 +243,21 @@ export function DigestsView() {
       </div>
 
       {schedOpen && (
-        <SchedModal groups={groups} t={t} onClose={() => setSchedOpen(false)}
+        <SchedModal key={newFreq} initialFreq={newFreq} groups={groups} t={t}
+                    onClose={() => setSchedOpen(false)}
                     onSaved={() => { setSchedOpen(false); void load(); }} />
       )}
     </div>
   );
 }
 
-function SchedModal({ groups, onClose, onSaved, t }: {
+function SchedModal({ initialFreq, groups, onClose, onSaved, t }: {
+  initialFreq: "daily" | "weekly";
   groups: { chat_id: number; title: string }[];
   onClose: () => void; onSaved: () => void; t: T;
 }) {
   const { toast } = useStore();
-  const [frequency, setFrequency] = useState<"daily" | "weekly">("daily");
+  const [frequency, setFrequency] = useState<"daily" | "weekly">(initialFreq);
   const [hour, setHour] = useState(9);
   const [language, setLanguage] = useState("auto");
   const [scope, setScope] = useState<Set<number>>(new Set());

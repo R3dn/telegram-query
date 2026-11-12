@@ -142,7 +142,10 @@ export function DetailsPanel() {
       </div>
 
       <div className="detail-note">
-        <ConversationBlock m={m} />
+        {/* key: the conversation block is opened per message; without the
+         * key, selecting a different message keeps the previous message's
+         * fetched thread (with the wrong target highlighted) on screen. */}
+        <ConversationBlock key={`${m.chat_id}:${m.msg_id}`} m={m} />
       </div>
 
       <EvidenceSection ev={evidence} setMode={setMode}

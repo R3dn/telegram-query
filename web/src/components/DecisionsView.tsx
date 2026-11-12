@@ -6,7 +6,7 @@
  *  archive at extraction time - a decision without resolvable sources is
  *  never stored. Status shows evidence-derived states (overdue for past
  *  due dates); confidence shows as an honest qualitative label. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
 import { useLang } from "../i18n";
@@ -36,18 +36,22 @@ export function DecisionsView() {
   const [sort, setSort] = useState("recent");
   const [expanded, setExpanded] = useState<number | null>(null);
   const [extractOpen, setExtractOpen] = useState(false);
+  const loadSeq = useRef(0);   // v1.0.2: last request wins
 
   const load = async () => {
+    const seq = ++loadSeq.current;
     try {
       const list = await api.decisions({
         q: q || undefined, status: status || undefined,
         kind: kind || undefined, group: group || undefined,
         sort,
       });
-      setRows(list);
+      if (seq === loadSeq.current) setRows(list);
     } catch (e) {
-      toast((e as Error).message, "err");
-      setRows([]);
+      if (seq === loadSeq.current) {
+        toast((e as Error).message, "err");
+        setRows([]);
+      }
     }
   };
 
@@ -73,9 +77,12 @@ export function DecisionsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastDone?.finished_at]);
 
-  // Evidence Explorer: arriving with a focus -> expand that decision
+  // Evidence Explorer: arriving with a focus -> expand that decision.
+  // v1.0.2: reset the filters first - the focused row may not match the
+  // active filter, in which case the old code burned the focus silently.
   useEffect(() => {
     if (evidenceFocus?.kind === "decision") {
+      setQ(""); setStatus(""); setKind(""); setGroup(""); setSort("recent");
       setExpanded(evidenceFocus.id);
       setEvidenceFocus(null);
     }

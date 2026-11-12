@@ -4,7 +4,7 @@
  *  Every row cites its original messages; sources are verified against the
  *  archive at extraction time - a deal without resolvable sources is never
  *  stored. Confidence shows as an honest qualitative label. */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
 import { useLang } from "../i18n";
@@ -30,10 +30,15 @@ export function DealsView() {
   const [sort, setSort] = useState("recent");
   const [expanded, setExpanded] = useState<number | null>(null);
   const [extractOpen, setExtractOpen] = useState(false);
+  const loadSeq = useRef(0);
 
-  // Evidence Explorer: arriving with a focus -> expand that deal
+  // Evidence Explorer: arriving with a focus -> expand that deal.
+  // v1.0.2: reset the filters first - the focused row may not match the
+  // active filter (e.g. an expired deal while status=active), in which
+  // case the old code burned the focus and the jump did nothing.
   useEffect(() => {
     if (evidenceFocus?.kind === "deal") {
+      setQ(""); setStatus(""); setCategory(""); setGroup(""); setSort("recent");
       setExpanded(evidenceFocus.id);
       setEvidenceFocus(null);
     }
@@ -41,16 +46,19 @@ export function DealsView() {
   }, [evidenceFocus]);
 
   const load = async () => {
+    const seq = ++loadSeq.current;   // v1.0.2: last request wins
     try {
       const list = await api.deals({
         q: q || undefined, status: status || undefined,
         category: category || undefined, group: group || undefined,
         sort,
       });
-      setRows(list);
+      if (seq === loadSeq.current) setRows(list);
     } catch (e) {
-      toast((e as Error).message, "err");
-      setRows([]);
+      if (seq === loadSeq.current) {
+        toast((e as Error).message, "err");
+        setRows([]);
+      }
     }
   };
 

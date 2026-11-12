@@ -259,6 +259,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           let rows = await api.search({
             q, groups: [...selection], sender: filters.sender,
             from: filters.from, to: filters.to,
+            media: filters.media,
             bookmarked: filters.starred || undefined,
             signal: ac.signal,
           });

@@ -4,7 +4,7 @@
  *  group stories, unanswered questions, and group activity - every
  *  card reaches the original messages in <=2 clicks. The only AI here
  *  is the optional topic timeline (cited, fingerprint-cached). */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useStore } from "../state/store";
 import { useLang } from "../i18n";
@@ -31,11 +31,19 @@ export function DiscoverView() {
   const [timeline, setTimeline] = useState<TimelineResult | null>(null);
   const [timelineBusy, setTimelineBusy] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  // v1.0.2: ordering guards. loadSeq: only the newest load() may write
+  // state (rapid 7d/30d flips or group toggles used to let a slow older
+  // response overwrite the newer one). tlSeq: same for the topic
+  // timeline, whose "close panel" click used to be resurrected by the
+  // response landing afterwards.
+  const loadSeq = useRef(0);
+  const tlSeq = useRef(0);
 
   const nDays = days === "7d" ? 7 : 30;
   const groupIds = [...selection];
 
   const load = async () => {
+    const seq = ++loadSeq.current;
     try {
       const [trendingRows, storyRows, questionRows, activityRows] = await Promise.all([
         api.discoverTrending({ days: nDays, groups: groupIds, minVolume: 1 }),
@@ -43,21 +51,24 @@ export function DiscoverView() {
         api.discoverQuestions({ status: "open", groups: groupIds }),
         api.discoverActivity({ days: 30, groups: groupIds }),
       ]);
+      if (seq !== loadSeq.current) return;   // superseded by a newer load
       setTrending(trendingRows); setStories(storyRows);
       setQuestions(questionRows); setActivity(activityRows);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       toast((e as Error).message, "err");
       setTrending([]); setStories([]); setQuestions([]); setActivity(null);
     }
   };
 
   useEffect(() => {
-    if (trending !== null) void load();
+    // v1.0.2: no `trending !== null` guard - it permanently swallowed
+    // filter changes made while the FIRST load was still in flight,
+    // leaving the view showing the previous window's data under the
+    // newly selected tab.
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days, selection, appState?.messages, jobs?.last_done?.finished_at]);
-
-  // first mount: fetch immediately
-  useEffect(() => { void load(); /* eslint-disable-line */ }, []);
 
   const openMessage = (m: { chat_id: number; msg_id: number }) => {
     void (async () => {
@@ -72,17 +83,27 @@ export function DiscoverView() {
   };
 
   const showTimeline = (term: string) => {
+    const seq = ++tlSeq.current;
     setTimelineBusy(true);
     setTimeline(null);
     void (async () => {
       try {
-        setTimeline(await api.topicTimeline({ term, chat_ids: groupIds, days: nDays }));
+        const r = await api.topicTimeline({ term, chat_ids: groupIds, days: nDays });
+        if (seq !== tlSeq.current) return;   // closed or superseded
+        setTimeline(r);
       } catch (e) {
+        if (seq !== tlSeq.current) return;
         toast((e as Error).message, "err");
       } finally {
-        setTimelineBusy(false);
+        if (seq === tlSeq.current) setTimelineBusy(false);
       }
     })();
+  };
+
+  const closeTimeline = () => {
+    tlSeq.current++;   // invalidate any in-flight timeline response
+    setTimeline(null);
+    setTimelineBusy(false);
   };
 
   const rebuild = () => {
@@ -144,7 +165,7 @@ export function DiscoverView() {
         <div className="seg">
           {(["7d", "30d"] as const).map((d) => (
             <button key={d} className={days === d ? "on" : ""}
-                    onClick={() => { setDays(d); setTimeline(null); }}>
+                    onClick={() => { setDays(d); closeTimeline(); }}>
               {t("discover.window.last", { n: d === "7d" ? 7 : 30 })}
             </button>
           ))}
@@ -231,7 +252,7 @@ export function DiscoverView() {
               <span className="dim" dir="auto">{timeline?.term ?? "…"}</span>
               <span style={{ flex: 1 }} />
               <button className="btn ghost sm" title={t("action.close")}
-                      onClick={() => { setTimeline(null); setTimelineBusy(false); }}>
+                      onClick={closeTimeline}>
                 <Ic.Close size={14} />
               </button>
             </div>

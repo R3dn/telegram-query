@@ -11,7 +11,8 @@ import { EmptyState } from "./EmptyState";
 import { Ic } from "../design/icons";
 
 export function ResearchView() {
-  const { appState, toast, groups, jobs, selection, toggleGroup } = useStore();
+  const { appState, toast, groups, jobs, selection, toggleGroup, refreshJobs,
+          evidenceFocus, setEvidenceFocus } = useStore();
   const { t } = useLang();
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -40,11 +41,23 @@ export function ResearchView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastDone?.finished_at]);
 
-  const creating = jobs?.running && jobs?.name === "brief";
+  // v1.0.2: Evidence Explorer jump - select the referenced brief.
+  // Without this the view silently defaulted to the newest brief.
+  useEffect(() => {
+    if (evidenceFocus?.kind === "brief") {
+      setSelectedId(evidenceFocus.id);
+      setEvidenceFocus(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidenceFocus]);
+
+  const [submitting, setSubmitting] = useState(false);
+  const creating = (jobs?.running && jobs?.name === "brief") || submitting;
 
   const create = async () => {
     const qt = question.trim();
     if (!qt || creating) return;
+    setSubmitting(true);
     const days: Record<string, [string, string | null]> = {
       "30d": [new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10), null],
       "90d": [new Date(Date.now() - 89 * 864e5).toISOString().slice(0, 10), null],
@@ -57,11 +70,16 @@ export function ResearchView() {
     }).catch((e) => {
       toast((e as Error).message, "err");
       return null;
-    });
+    }).finally(() => setSubmitting(false));
     if (r) {
       toast(t("research.queued"), "info");
       setQuestion("");
       setSelectedId(r.id);
+      // v1.0.2: kick the store's job poller - without this, jobs.running
+      // stays stale-false, `creating` never engages, and a double submit
+      // creates a duplicate brief.
+      void refreshJobs();
+      void load();
     }
   };
 
@@ -161,7 +179,10 @@ export function ResearchView() {
                         hint={t("research.generatingHint")} />
           )}
           {selected?.latest && (
-            <BriefDetail brief={selected}
+            /* key: without it React reuses this component instance when
+             * switching briefs, so the notes textarea keeps the previous
+             * brief's notes and "save" writes them onto the new brief. */
+            <BriefDetail key={selected.id} brief={selected}
                          onDeleted={() => { setSelectedId(null); void load(); }}
                          onReload={() => void load()} />
           )}
@@ -265,7 +286,15 @@ function BriefDetail({ brief, onDeleted, onReload }: {
             <span className="src-date">{(c.date ?? "").slice(0, 10)}</span>
             <span className="src-sender" dir="auto">{c.sender_name ?? ""}</span>
             <span className="src-text" dir="auto">{(c.text ?? "").slice(0, 110)}</span>
-            {c.tg_link && <span className="link">{t("action.openTelegram")}</span>}
+            {c.tg_link && (
+              /* v1.0.2: a real button that stops propagation - the old
+               * passive <span class="link"> looked clickable but the row
+               * handler swallowed the click and opened the in-app view. */
+              <span className="link" role="button"
+                    onClick={(e) => { e.stopPropagation(); window.open(c.tg_link!, "_blank", "noopener"); }}>
+                {t("action.openTelegram")}
+              </span>
+            )}
           </button>
         ))}
       </details>
@@ -284,3 +313,4 @@ function BriefDetail({ brief, onDeleted, onReload }: {
     </div>
   );
 }
+
